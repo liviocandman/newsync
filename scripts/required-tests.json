@@ -3,29 +3,92 @@
     "br.com.agregador.ingestion.FeedParserTest": {
       "treatsEmptyMarkupAndRemovedActiveContentAsAbsentBody": 1,
       "sanitizesHtmlThatWillBeStored": 1,
-      "rejectsExternalEntitiesWithoutMakingARequest": 1
+      "rejectsExternalEntitiesWithoutMakingARequest": 1,
+      "acceptsMissingGuidAndKeepsEditorialLinkSeparateFromComments": 1,
+      "preservesOpaqueGuidAndChoosesFirstNonemptyEncodedBodyInDocumentOrder": 1,
+      "distinguishesEmptySuccessPartialAndEntirelyInvalidDocuments": 1,
+      "producesDeterministicFingerprintsForAmbiguousUrlsAndMissingIdentity": 1,
+      "enforcesXmlItemAndArticleLimitsWithoutTruncation": 1,
+      "acceptsXmlDeclaredCharsetAndBom": 1,
+      "rejectsOversizedAttributesAndExcessivelyNestedXml": 1,
+      "honorsHttpCharsetWithoutXmlDeclarationAndRejectsConflictingBom": 1
+    },
+    "br.com.agregador.ArchitectureTest": {
+      "parsingAndControllersCannotOpenExternalConnections": 1,
+      "apacheHttpIsConfinedToTheSinglePublicFeedClient": 1,
+      "productControllersDoNotContainSqlOrCallTheCollector": 1
+    },
+    "br.com.agregador.ingestion.PublicFeedClientTest": {
+      "receivesXmlFromValidatedPinnedAddressWithOriginalHost": 4,
+      "rebindingCannotTriggerIndependentDnsLookupBeforeConnection": 1,
+      "mixedResolutionIsRejectedBeforeAnyConnection": 1,
+      "redirectsAreRevalidatedAndNeverReachPrivateDestination": 1,
+      "literalPrivateRedirectIsRejectedBeforeResolution": 1,
+      "allowsThreeRedirectsAndRejectsFourth": 1,
+      "keepsConditionalHeadersOnlyForSameOriginAndNeverUsesCookiesOrAuthentication": 1,
+      "notModifiedRequiresAnExistingValidator": 1,
+      "crossOriginNotModifiedWithoutSentValidatorsIsRejected": 1,
+      "keepsHttpCharsetWithExactBytesForTheXmlParser": 1,
+      "redirectRetryAfterPreventsTheNextConnection": 1,
+      "retryAfterIsLimitedToSafeDiagnosticAndSupportsDeltaOrDate": 1,
+      "enforcesDecompressedLimitForGzipAndChunkedBodies": 1,
+      "rejectsHtmlAndUnsupportedEncoding": 1,
+      "retryAfterSurvivesInvalidMediaAndDecompressionFailure": 1,
+      "interruptedBodyIsNeverReturnedAsSuccessful": 1,
+      "httpsRejectsAnUntrustedCertificateBeforeAnyHttpRequest": 1,
+      "totalBudgetIncludesBlockingDnsWithoutAnyLateConnection": 1,
+      "totalBudgetIncludesSlowStreamingAndAllRedirects": 1
+    },
+    "br.com.agregador.ingestion.PublicFeedUrlTest": {
+      "registrationNormalizesWithoutDnsAndPreservesRawPathQuery": 1,
+      "rejectsUnsafeOrAmbiguousDestinationsWithoutDns": 41,
+      "permitsGlobalAddresses": 8
     }
   },
   "failsafe": {
     "br.com.agregador.DatabaseIT": {
-      "normalProfileHasNoInitializerOrAnonymousApi": 1,
+      "normalProfileHasNoInitializerAndAllowsLocalReader": 1,
       "reimportsAndMergesWithoutLosingIdentityStateOrMissingFields": 1,
       "t36RollsBackArticlesAndSourceMetadataWhenCommitFails": 1,
-      "migratesAnEmptyPostgres": 1
+      "migratesAnEmptyPostgres": 1,
+      "t06PromotesUniqueUrlToGuidAndPreservesKnownGuidWhenItDisappears": 1,
+      "t06DistinctGuidsAndAmbiguousUrlsNeverMergeExistingIdentitiesOrStates": 1,
+      "t06ReusedUrlsAndChangedFingerprintsDoNotOverwriteEarlierArticles": 1,
+      "t06AmbiguousUrlsInTheSameResponseUseFingerprintsAndCannotBePromotedApproximately": 1,
+      "t11ConcurrentEditorialAndPersonalChangesPreserveBoth": 1,
+      "editorialDateCorrectionPreservesSortAndMissingFieldsPreserveContent": 1,
+      "migratesV001WithExistingArticleAndPersonalStates": 1,
+      "t06PublicationEvidenceAllowsPromotionButConflictingDatesBlockUrlReconciliation": 1,
+      "t36ManualCommitFailurePreservesPendingRequestAndValidatorsWithAllArticles": 1,
+      "t06InvalidItemsStillMakeAResponseUrlAmbiguous": 1
     },
     "br.com.agregador.DemoHttpIT": {
+      "hostileHtmlIsCommittedSanitizedAndReturnedThroughHttp": 1,
       "bootIsIdempotentAndReadyOnlyAfterImport": 1,
       "detailContractForBodyAbsentBodyAndPreservedBody": 1,
       "validatesStateCsrfOriginIdsAndUnsupportedParameters": 1,
       "t11ConcurrentIndependentHttpPatchesPreserveBothFields": 1,
-      "hostileHtmlIsCommittedSanitizedAndReturnedThroughHttp": 1
+      "demoRejectsRegistrationExternalRefreshAndSourceLifecycle": 1
     },
     "br.com.agregador.MigrationFailureIT": {
       "migrationFailurePreventsDemoReadiness": 1
     },
     "br.com.agregador.DemoConfigurationIT": {
       "localHttpBootImportsAndBecomesReady": 1,
-      "invalidDemoConfigurationNeverBecomesReady": 12
+      "invalidDemoConfigurationNeverBecomesReady": 12,
+      "invalidNormalConfigurationNeverBecomesReady": 15
+    },
+    "br.com.agregador.SourceHttpIT": {
+      "registersPendingWithoutDownloadAndValidatesLifecycleAndDuplicates": 1,
+      "csrfCodesOriginPrecedenceAndNoWritesOnEveryNegative": 1,
+      "manualRequestIsDurableSequentialAndConditionalWithPersistedCooldown": 1,
+      "staleDownloadCannotChangeReactivatedSourceOrConsumeNewRequest": 4,
+      "feedPaginationUsesTiesFiltersAndRejectsInvalidOrReusedCursors": 1,
+      "partialAndFailedResultsPreserveLastSuccessAndValidators": 1,
+      "dispatcherRetainsRequestAfterCommitFailureAndWaitsBeforeRetry": 1,
+      "invalidXmlPreservesHttpRetryAfterAndBlocksNewRequest": 1,
+      "aFreshDispatcherResumesOnlyDurableEligibleManualRequests": 1,
+      "sharedHttpParameterValidationPreservesUnsupportedCode": 1
     }
   },
   "vitest": {
@@ -33,12 +96,35 @@
       "mantém o estado anterior quando uma gravação falha",
       "abrir não marca lido e mostra a ausência de corpo",
       "mostra carregamento e lista vazia",
-      "expõe falha de leitura e permite repetir"
+      "expõe falha de leitura e permite repetir",
+      "cadastro confirma a fonte pendente sem solicitar importação",
+      "falha ao pausar conserva a fonte ativa e permite uma nova ação",
+      "filtro novo descarta cursor anterior e usa valores declarativos"
     ],
     "tests/stop-process.test.ts": [
       "cancela o prazo de A e mantém B vivo depois do prazo antigo",
       "força somente A quando ele ignora SIGTERM e preserva B"
+    ],
+    "src/api.test.ts": [
+      "renova somente CSRF_INVALID e reenvia o mesmo PATCH uma vez",
+      "encerra após a segunda falha CSRF sem um terceiro PATCH",
+      "falha na renovação encerra sem reenviar a marcação",
+      "não repete ORIGIN_REJECTED com status 403",
+      "não repete FORBIDDEN com status 403",
+      "não repete OTHER com status 403",
+      "não repete CSRF_INVALID com status 401",
+      "não repete UNAVAILABLE com status 503",
+      "403 sem código não renova nem repete",
+      "erro de rede não renova nem repete",
+      "falha no primeiro GET CSRF não envia PATCH e permite nova ação explícita",
+      "serializa filtros e cursor e aceita arquivamento 204"
     ]
   },
-  "playwright": "abrir → marcar → recarregar → reiniciar preserva estados e bloqueia conteúdo ativo"
+  "playwright": {
+    "demo": "abrir → marcar → recarregar → reiniciar preserva estados e bloqueia conteúdo ativo",
+    "normal": [
+      "normal vazio → fonte pendente → leitura → restart recupera CSRF uma vez → ciclo da fonte",
+      "pedido manual e cooldown sobrevivem ao restart com banco próprio"
+    ]
+  }
 }

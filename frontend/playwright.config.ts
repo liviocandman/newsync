@@ -1,12 +1,18 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
+  outputDir: `test-results/${process.env.NEWS_E2E_MODE ?? 'normal'}`,
   fullyParallel: false,
   workers: 1,
   timeout: 120_000,
   reporter: [
     ['list'],
-    ['json', { outputFile: 'test-results/playwright.json' }],
+    [
+      'json',
+      {
+        outputFile: `test-results/playwright-${process.env.NEWS_E2E_MODE ?? 'normal'}.json`,
+      },
+    ],
   ],
   use: {
     actionTimeout: 15_000,

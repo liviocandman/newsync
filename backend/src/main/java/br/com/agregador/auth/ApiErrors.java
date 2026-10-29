@@ -1,12 +1,13 @@
 package br.com.agregador.auth;
 
-import br.com.agregador.articles.ArticleController.UnsupportedParameters;
+import br.com.agregador.auth.HttpParameters.UnsupportedParameters;
 import jakarta.servlet.http.*;
 import java.io.IOException;
 import java.util.NoSuchElementException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -46,7 +47,12 @@ public class ApiErrors {
     int status;
     String code;
     String message;
-    if (error instanceof UnsupportedParameters) {
+    if (error instanceof br.com.agregador.sources.SourceService.Rejected rejected) {
+      var response = ResponseEntity.status(rejected.status()).header("Cache-Control", "no-store");
+      if (rejected.retryAfter() > 0)
+        response.header("Retry-After", Long.toString(rejected.retryAfter()));
+      return response.body(new Error(rejected.code(), rejected.getMessage(), requestId(request)));
+    } else if (error instanceof UnsupportedParameters) {
       status = 400;
       code = "UNSUPPORTED_PARAMETERS";
       message = "Parâmetros ainda não implementados.";
@@ -60,6 +66,7 @@ public class ApiErrors {
       code = "DATABASE_UNAVAILABLE";
       message = "Banco temporariamente indisponível.";
     } else if (error instanceof IllegalArgumentException
+        || error instanceof HttpMediaTypeNotSupportedException
         || error instanceof HttpMessageNotReadableException
         || error instanceof MethodArgumentTypeMismatchException) {
       status = 400;

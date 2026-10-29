@@ -40,7 +40,7 @@ class DemoConfigurationIT {
     url = "jdbc:postgresql://" + db.getHost() + ":" + db.getFirstMappedPort() + "/" + DATABASE;
     var flyway = Flyway.configure().dataSource(url, db.getUsername(), db.getPassword()).load();
     flyway.migrate();
-    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("001");
+    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("002");
   }
 
   @AfterAll
@@ -58,6 +58,10 @@ class DemoConfigurationIT {
     final AtomicReference<ConfigurableApplicationContext> context = new AtomicReference<>();
 
     void run(String address, String origin) {
+      run("demo", address, origin);
+    }
+
+    void run(String profile, String address, String origin) {
       var db = DatabaseIT.POSTGRES;
       new SpringApplicationBuilder(NewsApplication.class)
           .listeners(
@@ -65,7 +69,7 @@ class DemoConfigurationIT {
                   event -> context.set(event.getApplicationContext()),
               (ApplicationListener<ApplicationReadyEvent>) event -> ready.set(true))
           .run(
-              "--spring.profiles.active=demo",
+              "--spring.profiles.active=" + profile,
               "--server.port=0",
               "--server.address=" + address,
               "--app.base-url=" + origin,
@@ -129,13 +133,44 @@ class DemoConfigurationIT {
       assertThat(failure)
           .isNotNull()
           .hasRootCauseInstanceOf(IllegalStateException.class)
-          .hasRootCauseMessage("Demo exige endereço e origem HTTP de loopback");
+          .hasRootCauseMessage("Aplicação exige endereço e origem HTTP de loopback");
       assertThat(failure)
           .hasStackTraceContaining("SecurityConfiguration")
-          .hasStackTraceContaining("Demo exige endereço e origem HTTP de loopback");
+          .hasStackTraceContaining("Aplicação exige endereço e origem HTTP de loopback");
       for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
         assertThat(cause.getMessage()).doesNotContain("demo-user", "demo-secret", origin);
       }
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "0.0.0.0, http://127.0.0.1:5173",
+    "::, http://127.0.0.1:5173",
+    "127.0.0.1, http://example.org:5173",
+    "127.0.0.1, http://demo-user:demo-secret@127.0.0.1:5173",
+    "127.0.0.1, http://127.0.0.1:5173/",
+    "127.0.0.1, http://127.0.0.1:5173/path",
+    "127.0.0.1, http://127.0.0.1:5173?query=demo-secret",
+    "127.0.0.1, http://127.0.0.1:5173#demo-secret",
+    "127.0.0.1, https://127.0.0.1:5173",
+    "127.0.0.1, ftp://127.0.0.1:5173",
+    "127.0.0.1, mailto:demo-secret@example.org",
+    "127.0.0.1, http://127.0.0.1:5173/%demo-secret",
+    "127.0.0.1, http://127.0.0.1:0",
+    "127.0.0.1, http://127.0.0.1:65536",
+    "127.0.0.1, http://127.0.0.1:"
+  })
+  void invalidNormalConfigurationNeverBecomesReady(String address, String origin) {
+    try (var boot = new Boot()) {
+      var failure = catchThrowable(() -> boot.run("normal", address, origin));
+      assertThat(boot.ready).isFalse();
+      assertThat(failure)
+          .isNotNull()
+          .hasRootCauseInstanceOf(IllegalStateException.class)
+          .hasRootCauseMessage("Aplicação exige endereço e origem HTTP de loopback");
+      for (Throwable cause = failure; cause != null; cause = cause.getCause())
+        assertThat(cause.getMessage()).doesNotContain("demo-user", "demo-secret", origin);
     }
   }
 }

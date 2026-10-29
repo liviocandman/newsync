@@ -96,6 +96,9 @@ def main():
                         if properties is not None:
                             tree.getroot().remove(properties)
                         tree.write(path, encoding="utf-8", xml_declaration=True)
+            scanner = ROOT / "backend/target/spotbugsXml.xml"
+            if scanner.exists():
+                shutil.copy2(scanner, destination / scanner.name)
             return destination
 
         def interrupted(_signal, _frame):
@@ -107,7 +110,11 @@ def main():
             # Provisionamento para o check em checkout limpo; não reescreve fontes.
             run("environment", ["python3", str(ROOT / "scripts/verify_environment.py")])
             run("gate-tests", ["python3", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"])
+            run("secrets", ["python3", str(ROOT / "scripts/scan_secrets.py"), str(output / "gitleaks.json")], timeout=300)
+            reports.require(json.loads((output / "gitleaks.json").read_text()) == [], "Varredura de segredos não aprovada")
+            summary["results"]["gitleaks"] = {"version": "8.30.1", "findings": 0}
             run("npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], ROOT / "frontend", 600)
+            run("audit-frontend", ["npm", "audit", "--omit=dev", "--audit-level=high"], ROOT / "frontend", 300)
             run("format-java", ["./mvnw", "-B", "spotless:check"], ROOT / "backend")
             run("format-frontend", ["npm", "run", "format:check"], ROOT / "frontend")
             for profile in ("normal", "demo"):
@@ -117,7 +124,10 @@ def main():
                 finally:
                     destination = archive_backend(profile)
                 summary["results"][profile] = reports.backend(destination)
-                summary["results"][profile]["jar"] = reports.jar(ROOT / "backend/target/news.jar", destination, profile)
+                reports.require((destination / "spotbugsXml.xml").is_file(), "Relatório SpotBugs/FindSecBugs ausente")
+                summary["results"][profile]["staticAnalysis"] = "SpotBugs/FindSecBugs passed"
+                shutil.copy2(ROOT / "backend/target/news.jar", destination / "news.jar")
+                summary["results"][profile]["jar"] = reports.jar(destination / "news.jar", destination, profile)
                 save()
             for name, command in (
                 ("typecheck", ["npm", "run", "typecheck"]),
@@ -129,11 +139,16 @@ def main():
                 if name == "vitest":
                     summary["results"][name] = reports.vitest(output / "vitest.json")
                     save()
-            env["NEWS_DEMO_SHA256"] = summary["results"]["demo"]["jar"]["sha256"]
+            for profile in ("normal", "demo"):
+                env["NEWS_" + profile.upper() + "_SHA256"] = summary["results"][profile]["jar"]["sha256"]
+                env["NEWS_" + profile.upper() + "_JAR"] = str(output / profile / "news.jar")
             shutil.rmtree(ROOT / "frontend/test-results", ignore_errors=True)
             e2e_attempted = True
-            run("playwright", ["npm", "run", "test:e2e"], ROOT / "frontend", 300)
-            summary["results"]["playwright"] = reports.playwright(ROOT / "frontend/test-results/playwright.json")
+            run("playwright", ["npm", "run", "test:e2e"], ROOT / "frontend", 600)
+            summary["results"]["playwright"] = {
+                profile: reports.playwright(ROOT / ("frontend/test-results/playwright-" + profile + ".json"), profile)
+                for profile in ("normal", "demo")
+            }
             processes = json.loads((ROOT / "frontend/test-results/processes.json").read_text())
             reports.require(processes == {"runId": run_id, "viteExited": True, "playwrightExited": True},
                             "Processos E2E não encerraram")

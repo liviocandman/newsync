@@ -1,8 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, Route, Routes, useParams } from 'react-router-dom';
-import { api, type Article, type State } from './api';
+import {
+  api,
+  type Article,
+  type Source,
+  type State,
+  type Filters,
+} from './api';
 import styles from './App.module.css';
 
+const demo = import.meta.env.VITE_APP_MODE === 'demo';
 function date(value: string | null) {
   return value
     ? new Intl.DateTimeFormat('pt-BR', {
@@ -20,16 +28,64 @@ function Failure({ error, retry }: { error: Error; retry: () => void }) {
     </div>
   );
 }
+function sourceResult(source: Source) {
+  if (source.manualRequestedAt)
+    return 'Importação solicitada; aguardando resultado.';
+  return {
+    never: 'Pendente; nenhuma importação concluída.',
+    success: 'Importação concluída.',
+    not_modified: 'Feed sem alterações.',
+    partial: 'Importação parcial; alguns itens foram ignorados.',
+    failed: 'A importação falhou.',
+  }[source.lastResult];
+}
+function sourcesQuery() {
+  return {
+    queryKey: ['sources'],
+    queryFn: api.sources,
+    refetchInterval: (query: { state: { data: Source[] | undefined } }) =>
+      query.state.data?.some((source) => source.manualRequestedAt)
+        ? 1500
+        : (false as const),
+  };
+}
 export function App() {
-  const articles = useQuery({ queryKey: ['articles'], queryFn: api.articles });
-  const sources = useQuery({ queryKey: ['sources'], queryFn: api.sources });
+  const [filters, setFilters] = useState<Filters>({});
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
+  const cursor = cursors.at(-1);
+  const articles = useQuery({
+    queryKey: ['articles', filters, cursor],
+    queryFn: () => api.articles({ ...filters, cursor }),
+  });
+  const sources = useQuery(sourcesQuery());
+  const client = useQueryClient();
+  const sourceResults = useRef(new Map<string, string>());
+  useEffect(() => {
+    let changed = false;
+    for (const source of sources.data ?? []) {
+      const signature = `${source.lastResult}/${source.lastSuccessAt}/${source.lastAttemptAt}/${source.manualRequestedAt}`;
+      if (
+        sourceResults.current.has(source.id) &&
+        sourceResults.current.get(source.id) !== signature
+      )
+        changed = true;
+      sourceResults.current.set(source.id, signature);
+    }
+    if (changed) void client.invalidateQueries({ queryKey: ['articles'] });
+  }, [sources.data, client]);
+  function filter(patch: Filters) {
+    setFilters({ ...filters, ...patch });
+    setCursors([undefined]);
+  }
   return (
     <div className={styles.app}>
       <header className={styles.header}>
         <Link to="/" className={styles.brand}>
           caderno<span>um tempo para ler</span>
         </Link>
-        <span className={styles.demo}>Demonstração local · B-00</span>
+        <span className={styles.demo}>
+          {demo ? 'Demonstração local · B-00' : 'Leitor pessoal local'}
+        </span>
       </header>
       <div className={styles.workspace}>
         <aside className={styles.sidebar} aria-label="Artigos">
@@ -38,9 +94,13 @@ export function App() {
             <span>{articles.data?.items.length ?? '—'}</span>
           </div>
           <h1>Pequenas descobertas.</h1>
-          <p className={styles.intro}>Textos para experimentar seu leitor.</p>
+          <p className={styles.intro}>
+            {demo
+              ? 'Textos para experimentar seu leitor.'
+              : 'Suas fontes, no seu tempo.'}
+          </p>
           {sources.isPending ? (
-            <p role="status">Carregando fonte…</p>
+            <p role="status">Carregando fontes…</p>
           ) : sources.isError ? (
             <Failure
               error={sources.error}
@@ -49,16 +109,82 @@ export function App() {
               }}
             />
           ) : (
-            sources.data.map((source) => (
-              <p key={source.id} className={styles.source}>
-                {source.title}
-                <span>
-                  {source.lastResult === 'success'
-                    ? 'Atualizada'
-                    : 'Aguardando atualização'}
-                </span>
-              </p>
-            ))
+            <>
+              {!demo && (
+                <Link className={styles.manageLink} to="/sources">
+                  Gerenciar fontes
+                </Link>
+              )}
+              <div className={styles.filters}>
+                <label>
+                  Fonte
+                  <select
+                    aria-label="Filtrar por fonte"
+                    value={filters.sourceId ?? ''}
+                    onChange={(event) =>
+                      filter({ sourceId: event.target.value || undefined })
+                    }
+                  >
+                    <option value="">Todas as fontes</option>
+                    {sources.data.map((source) => (
+                      <option key={source.id} value={source.id}>
+                        {source.title}
+                        {source.state === 'archived' ? ' (arquivada)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Leitura
+                  <select
+                    aria-label="Filtrar por leitura"
+                    value={
+                      filters.read === undefined ? '' : String(filters.read)
+                    }
+                    onChange={(event) =>
+                      filter({
+                        read:
+                          event.target.value === ''
+                            ? undefined
+                            : event.target.value === 'true',
+                      })
+                    }
+                  >
+                    <option value="">Todos os artigos</option>
+                    <option value="false">Não lidos</option>
+                    <option value="true">Lidos</option>
+                  </select>
+                </label>
+                <label>
+                  Salvos
+                  <select
+                    aria-label="Filtrar por salvos"
+                    value={
+                      filters.saved === undefined ? '' : String(filters.saved)
+                    }
+                    onChange={(event) =>
+                      filter({
+                        saved:
+                          event.target.value === ''
+                            ? undefined
+                            : event.target.value === 'true',
+                      })
+                    }
+                  >
+                    <option value="">Todos</option>
+                    <option value="true">Salvos</option>
+                    <option value="false">Não salvos</option>
+                  </select>
+                </label>
+              </div>
+              {demo &&
+                sources.data.map((source) => (
+                  <p key={source.id} className={styles.source}>
+                    {source.title}
+                    <span>{sourceResult(source)}</span>
+                  </p>
+                ))}
+            </>
           )}
           {articles.isPending ? (
             <p role="status">Carregando artigos…</p>
@@ -72,7 +198,7 @@ export function App() {
           ) : articles.data.items.length === 0 ? (
             <p>Nenhum artigo por aqui ainda.</p>
           ) : (
-            <nav>
+            <nav aria-label="Lista de artigos">
               <ul className={styles.list}>
                 {articles.data.items.map((article) => (
                   <li key={article.id}>
@@ -88,7 +214,11 @@ export function App() {
                       <span className={styles.articleMeta}>
                         {article.saved
                           ? 'Salvo na sua coleção'
-                          : 'Caderno de demonstração'}
+                          : demo
+                            ? 'Caderno de demonstração'
+                            : (sources.data?.find(
+                                (source) => source.id === article.sourceId,
+                              )?.title ?? 'Recebido do feed')}
                         <span aria-hidden="true">↗</span>
                       </span>
                     </Link>
@@ -97,13 +227,36 @@ export function App() {
               </ul>
             </nav>
           )}
+          {(cursors.length > 1 || articles.data?.nextCursor) && (
+            <div className={styles.pagination}>
+              <button
+                disabled={cursors.length === 1 || articles.isFetching}
+                onClick={() => setCursors(cursors.slice(0, -1))}
+              >
+                Página anterior
+              </button>
+              <span>Página {cursors.length}</span>
+              <button
+                disabled={!articles.data?.nextCursor || articles.isFetching}
+                onClick={() => {
+                  if (articles.data?.nextCursor)
+                    setCursors([...cursors, articles.data.nextCursor]);
+                }}
+              >
+                Próxima página
+              </button>
+            </div>
+          )}
           <p className={styles.footnote}>
-            Dados sintéticos. As marcações ficam neste banco local.
+            {demo
+              ? 'Dados sintéticos. As marcações ficam neste banco local.'
+              : 'As marcações ficam nesta instalação. Novos artigos chegam quando você pede uma importação.'}
           </p>
         </aside>
         <main className={styles.main}>
           <Routes>
             <Route path="/articles/:id" element={<Reader />} />
+            {!demo && <Route path="/sources" element={<SourcesScreen />} />}
             <Route
               path="*"
               element={
@@ -119,6 +272,11 @@ export function App() {
                     <br />
                     Você decide o que marcar como lido ou guardar.
                   </p>
+                  {!demo && (
+                    <Link className={styles.manageLink} to="/sources">
+                      Adicionar uma fonte
+                    </Link>
+                  )}
                 </div>
               }
             />
@@ -126,6 +284,248 @@ export function App() {
         </main>
       </div>
     </div>
+  );
+}
+function SourcesScreen() {
+  const client = useQueryClient();
+  const sources = useQuery(sourcesQuery());
+  const [feedUrl, setFeedUrl] = useState('');
+  const [title, setTitle] = useState('');
+  const creation = useMutation({
+    mutationFn: () =>
+      api.createSource({
+        feedUrl: feedUrl.trim(),
+        ...(title.trim() ? { title: title.trim() } : {}),
+      }),
+    onSuccess: async () => {
+      setFeedUrl('');
+      setTitle('');
+      await client.invalidateQueries({ queryKey: ['sources'] });
+    },
+  });
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    creation.mutate();
+  }
+  return (
+    <section className={styles.sourceManager}>
+      <span className={styles.eyebrow}>SEU ACERVO LOCAL</span>
+      <h2>Fontes de leitura</h2>
+      <p>
+        Cadastre o endereço RSS ou Atom. Depois, peça a importação quando quiser
+        receber artigos.
+      </p>
+      <form className={styles.sourceForm} onSubmit={submit}>
+        <label>
+          URL do feed
+          <input
+            name="feedUrl"
+            type="url"
+            required
+            value={feedUrl}
+            placeholder="https://exemplo.org/feed.xml"
+            onChange={(event) => setFeedUrl(event.target.value)}
+          />
+        </label>
+        <label>
+          Título (opcional)
+          <input
+            name="title"
+            value={title}
+            maxLength={300}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        </label>
+        <button disabled={creation.isPending} type="submit">
+          {creation.isPending ? 'Cadastrando…' : 'Cadastrar fonte'}
+        </button>
+      </form>
+      {creation.isSuccess && (
+        <p role="status">
+          Fonte cadastrada. Peça a importação para receber artigos.
+        </p>
+      )}
+      {creation.isError && (
+        <p role="alert" className={styles.error}>
+          {creation.error.message}
+          {'code' in creation.error &&
+            creation.error.code === 'SOURCE_EXISTS' &&
+            ' A URL já pertence a uma fonte desta instalação. Encontre-a abaixo e use Reativar se estiver pausada ou arquivada.'}
+        </p>
+      )}
+      {sources.isPending ? (
+        <p role="status">Carregando fontes…</p>
+      ) : sources.isError ? (
+        <Failure
+          error={sources.error}
+          retry={() => {
+            void sources.refetch();
+          }}
+        />
+      ) : sources.data.length === 0 ? (
+        <p>Nenhuma fonte cadastrada.</p>
+      ) : (
+        <ul className={styles.sourceList}>
+          {sources.data.map((source) => (
+            <SourceCard key={source.id} source={source} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+function SourceCard({ source }: { source: Source }) {
+  const client = useQueryClient();
+  const [renaming, setRenaming] = useState(false);
+  const [title, setTitle] = useState(source.title);
+  const action = useMutation({
+    mutationFn: async (
+      command: 'refresh' | 'pause' | 'activate' | 'archive' | 'rename',
+    ): Promise<void> => {
+      if (command === 'refresh') {
+        await api.refreshSource(source.id);
+        return;
+      }
+      if (command === 'archive') {
+        await api.archiveSource(source.id);
+        return;
+      }
+      await api.updateSource(
+        source.id,
+        command === 'rename'
+          ? { title: title.trim() }
+          : { state: command === 'pause' ? 'paused' : 'active' },
+      );
+    },
+    onSuccess: async (_, command) => {
+      if (command === 'rename') setRenaming(false);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['sources'] }),
+        client.invalidateQueries({ queryKey: ['articles'] }),
+      ]);
+    },
+  });
+  return (
+    <li className={styles.sourceCard} aria-label={`Fonte ${source.title}`}>
+      <div className={styles.sourceHeading}>
+        <h3>{source.title}</h3>
+        <span>
+          {
+            { active: 'Ativa', paused: 'Pausada', archived: 'Arquivada' }[
+              source.state
+            ]
+          }
+        </span>
+      </div>
+      <p className={styles.feedUrl}>{source.feedUrl}</p>
+      <p role={source.manualRequestedAt ? 'status' : undefined}>
+        {sourceResult(source)}
+      </p>
+      {source.diagnostic && (
+        <p className={styles.error}>{source.diagnostic.message}</p>
+      )}
+      {source.lastSuccessAt && (
+        <p className={styles.sourceTimestamp}>
+          Último sucesso: {date(source.lastSuccessAt)}
+        </p>
+      )}
+      {source.retryAfterAt && (
+        <p className={styles.sourceTimestamp}>
+          Próxima solicitação permitida após{' '}
+          {new Date(source.retryAfterAt).toLocaleString('pt-BR')}.
+        </p>
+      )}
+      {renaming && (
+        <form
+          className={styles.renameForm}
+          onSubmit={(event) => {
+            event.preventDefault();
+            action.mutate('rename');
+          }}
+        >
+          <label>
+            Novo título
+            <input
+              value={title}
+              maxLength={300}
+              required
+              onChange={(event) => setTitle(event.target.value)}
+            />
+          </label>
+          <button disabled={action.isPending || !title.trim()} type="submit">
+            Confirmar título
+          </button>
+          <button
+            disabled={action.isPending}
+            type="button"
+            onClick={() => setRenaming(false)}
+          >
+            Cancelar
+          </button>
+        </form>
+      )}
+      <div className={styles.sourceActions}>
+        {source.state === 'active' && (
+          <>
+            <button
+              disabled={action.isPending || !!source.manualRequestedAt}
+              onClick={() => action.mutate('refresh')}
+            >
+              {source.manualRequestedAt
+                ? 'Importação solicitada'
+                : 'Importar agora'}
+            </button>
+            <button
+              disabled={action.isPending}
+              onClick={() => action.mutate('pause')}
+            >
+              Pausar
+            </button>
+          </>
+        )}
+        {source.state !== 'active' && (
+          <button
+            disabled={action.isPending}
+            onClick={() => action.mutate('activate')}
+          >
+            Reativar
+          </button>
+        )}
+        {source.state !== 'archived' && (
+          <button
+            disabled={action.isPending || renaming}
+            onClick={() => {
+              setTitle(source.title);
+              setRenaming(true);
+            }}
+          >
+            Renomear
+          </button>
+        )}
+        {source.state !== 'archived' && (
+          <button
+            disabled={action.isPending}
+            onClick={() => action.mutate('archive')}
+          >
+            Arquivar
+          </button>
+        )}
+      </div>
+      {action.isPending && <p role="status">Enviando…</p>}
+      {action.isSuccess && action.variables === 'refresh' && (
+        <p role="status">
+          Pedido de importação aceito. O resultado aparecerá nesta fonte.
+        </p>
+      )}
+      {action.isError && (
+        <p role="alert" className={styles.error}>
+          {action.error.message}
+          {'retryAfter' in action.error &&
+            typeof action.error.retryAfter === 'string' &&
+            ` Aguarde o prazo informado: ${action.error.retryAfter}.`}
+        </p>
+      )}
+    </li>
   );
 }
 function Reader() {
@@ -170,7 +570,9 @@ function ArticleReader({ id }: { id: string }) {
   return (
     <article className={styles.reader} key={id}>
       <div className={styles.readerTop}>
-        <span className={styles.eyebrow}>CADERNO DE DEMONSTRAÇÃO</span>
+        <span className={styles.eyebrow}>
+          {demo ? 'CADERNO DE DEMONSTRAÇÃO' : 'RECEBIDO DO FEED'}
+        </span>
         <span>{date(article.publishedAt)}</span>
       </div>
       <h2>{article.title}</h2>

@@ -31,7 +31,8 @@ class ReportGateTest(unittest.TestCase):
                 ET.ElementTree(summary).write(folder / "failsafe-summary.xml")
 
     def test_valid_reports_then_missing_integration_suite_fails(self):
-        self.assertEqual(reports.backend(self.root)["failsafe"]["tests"], 23)
+        self.assertEqual(reports.backend(self.root)["failsafe"]["tests"],
+                         sum(sum(methods.values()) for methods in reports.REQUIRED["failsafe"].values()))
         (self.root / "failsafe-reports/TEST-br.com.agregador.DemoConfigurationIT.xml").unlink()
         with self.assertRaisesRegex(RuntimeError, "Suíte obrigatória ausente"):
             reports.backend(self.root)
@@ -90,10 +91,11 @@ class ReportGateTest(unittest.TestCase):
         suites = [{"name": "/frontend/" + name, "status": "passed",
                    "assertionResults": [{"fullName": method, "status": "passed"} for method in methods]}
                   for name, methods in reports.REQUIRED["vitest"].items()]
-        data = {"success": True, "testResults": suites, "numTotalTests": 6, "numPassedTests": 6}
+        count = sum(len(methods) for methods in reports.REQUIRED["vitest"].values())
+        data = {"success": True, "testResults": suites, "numTotalTests": count, "numPassedTests": count}
         path = self.root / "vitest.json"
         path.write_text(json.dumps(data))
-        self.assertEqual(reports.vitest(path)["tests"], 6)
+        self.assertEqual(reports.vitest(path)["tests"], count)
         suites[-1]["assertionResults"][-1]["status"] = "pending"
         path.write_text(json.dumps(data))
         with self.assertRaisesRegex(RuntimeError, "falha/skip/abort"):

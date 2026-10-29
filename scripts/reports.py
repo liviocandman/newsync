@@ -84,7 +84,7 @@ def vitest(path):
     return {"tests": count, "failures": 0, "skips": 0, "suites": sorted(found)}
 
 
-def playwright(path):
+def playwright(path, profile="demo"):
     report = json.loads(path.read_text())
     require(not report.get("errors"), "Playwright: erro do runner")
     stats = report["stats"]
@@ -104,6 +104,9 @@ def playwright(path):
 
     for suite in report["suites"]:
         visit(suite)
-    require(REQUIRED["playwright"] in found, "Playwright: percurso central ausente")
+    required = REQUIRED["playwright"][profile]
+    if isinstance(required, str):
+        required = [required]
+    require(set(required) <= set(found), "Playwright: percurso central ausente")
     require(len(found) == stats["expected"], "Playwright: contagem incompleta")
     return {"tests": len(found), "failures": 0, "skips": 0, "scenarios": found}

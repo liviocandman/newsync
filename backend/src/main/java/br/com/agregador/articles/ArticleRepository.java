@@ -49,6 +49,45 @@ public class ArticleRepository {
         .list();
   }
 
+  public record FeedRow(
+      UUID id,
+      UUID sourceId,
+      String title,
+      OffsetDateTime publishedAt,
+      boolean read,
+      boolean saved,
+      OffsetDateTime sortAt) {
+    public Summary summary() {
+      return new Summary(id, sourceId, title, publishedAt, read, saved);
+    }
+  }
+
+  public List<FeedRow> page(ArticlePagination.Request filter) {
+    var conditions = new ArrayList<String>();
+    var values = new HashMap<String, Object>();
+    if (filter.sourceId() != null) {
+      conditions.add("source_id=:source");
+      values.put("source", filter.sourceId());
+    }
+    if (filter.read() != null)
+      conditions.add("read_at IS " + (filter.read() ? "NOT NULL" : "NULL"));
+    if (filter.saved() != null)
+      conditions.add("saved_at IS " + (filter.saved() ? "NOT NULL" : "NULL"));
+    if (filter.before() != null) {
+      conditions.add("(sort_at,id)<(:before,:beforeId)");
+      values.put("before", filter.before());
+      values.put("beforeId", filter.beforeId());
+    }
+    values.put("limit", filter.limit() + 1);
+    return jdbc.sql(
+            "SELECT id,source_id,title,published_at,read_at IS NOT NULL AS read,saved_at IS NOT NULL AS saved,sort_at FROM articles"
+                + (conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions))
+                + " ORDER BY sort_at DESC,id DESC LIMIT :limit")
+        .params(values)
+        .query(FeedRow.class)
+        .list();
+  }
+
   public Article find(UUID id) {
     return jdbc.sql(
             """

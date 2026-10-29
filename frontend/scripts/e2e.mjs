@@ -1,10 +1,9 @@
 import { spawn, execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { stopProcess } from '../e2e/support/stop-process.ts';
@@ -22,7 +21,6 @@ const env = Object.fromEntries(
   ),
 );
 env.NEWS_E2E_RUN_ID = runId;
-
 function docker(...args) {
   return execFileSync('docker', args, {
     encoding: 'utf8',
@@ -35,21 +33,19 @@ function cleanup() {
     .split(/\s+/)
     .filter(Boolean);
   if (ids.length) docker('rm', '--force', ...ids);
-  const remaining = docker('ps', '-aq', '--filter', `label=${label}`);
-  if (remaining) throw new Error('Cleanup E2E incompleto.');
+  if (docker('ps', '-aq', '--filter', `label=${label}`))
+    throw new Error('Cleanup E2E incompleto.');
   mkdirSync(resolve(frontend, 'test-results'), { recursive: true });
   writeFileSync(
     resolve(frontend, 'test-results/cleanup.json'),
     JSON.stringify({ runId, remainingContainers: 0 }) + '\n',
   );
 }
-
 if (process.argv.includes('--cleanup')) {
   if (!process.env.NEWS_E2E_RUN_ID)
     throw new Error('Cleanup exige NEWS_E2E_RUN_ID explícito.');
   cleanup();
 } else {
-  // O probe usa bind, sem consultar HTTP de qualquer serviço preexistente.
   const probes = [];
   try {
     for (const port of [18080, 5174]) {
@@ -60,25 +56,50 @@ if (process.argv.includes('--cleanup')) {
     }
   } finally {
     await Promise.all(
-      probes.map((probe) => new Promise((resolve) => probe.close(resolve))),
+      probes.map((probe) => new Promise((done) => probe.close(done))),
     );
   }
-  const jar = readFileSync(resolve(frontend, '../backend/target/news.jar'));
-  if (
-    env.NEWS_DEMO_SHA256 &&
-    createHash('sha256').update(jar).digest('hex') !== env.NEWS_DEMO_SHA256
-  )
-    throw new Error('JAR demo difere do artefato recém-verificado.');
+  const jarTool = process.env.JAVA_HOME
+    ? join(process.env.JAVA_HOME, 'bin', 'jar')
+    : 'jar';
+  const jarProof = {};
+  for (const mode of ['normal', 'demo']) {
+    const jarPath = env[`NEWS_${mode.toUpperCase()}_JAR`];
+    const expectedHash = env[`NEWS_${mode.toUpperCase()}_SHA256`];
+    if (!jarPath || !expectedHash)
+      throw new Error(
+        `Informe caminho e hash do JAR ${mode} recém-verificado pelo gate.`,
+      );
+    const sha256 = createHash('sha256')
+      .update(readFileSync(jarPath))
+      .digest('hex');
+    if (sha256 !== expectedHash)
+      throw new Error(`JAR ${mode} difere do artefato recém-verificado.`);
+    const inventory = execFileSync(jarTool, ['tf', jarPath], {
+      encoding: 'utf8',
+    }).split(/\r?\n/);
+    const demoEntries = inventory.filter(
+      (entry) =>
+        entry.startsWith('BOOT-INF/classes/demo/') && !entry.endsWith('/'),
+    );
+    if (
+      JSON.stringify(demoEntries) !==
+      JSON.stringify(mode === 'demo' ? ['BOOT-INF/classes/demo/feed.xml'] : [])
+    )
+      throw new Error(`Inventário demo incorreto no JAR ${mode}.`);
+    jarProof[mode] = { path: jarPath, sha256, demoEntries };
+  }
+  if (resolve(env.NEWS_NORMAL_JAR) === resolve(env.NEWS_DEMO_JAR))
+    throw new Error('Normal e demo exigem artefatos separados.');
   let signalExit = 0;
   let killTimer;
   let child;
   let vite;
-  let viteLog = '';
-  function killGroup(childProcess, signal) {
-    if (!childProcess?.pid) return;
+  let allExited = true;
+  function killGroup(processToKill, signal) {
+    if (!processToKill?.pid) return;
     try {
-      // Todos os grupos abaixo foram criados por este supervisor.
-      process.kill(-childProcess.pid, signal);
+      process.kill(-processToKill.pid, signal);
     } catch (error) {
       if (error.code !== 'ESRCH') throw error;
     }
@@ -95,91 +116,121 @@ if (process.argv.includes('--cleanup')) {
   process.on('SIGINT', () => stop('SIGINT'));
   process.on('SIGTERM', () => stop('SIGTERM'));
   try {
-    // Vite também pertence ao supervisor; o webServer do runner cria outro grupo.
-    vite = spawn(
-      process.execPath,
-      [resolve(frontend, 'node_modules/vite/bin/vite.js'), '--port', '5174'],
-      {
-        cwd: frontend,
-        env: { ...env, API_PROXY_TARGET: 'http://127.0.0.1:18080' },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: true,
-      },
+    mkdirSync(resolve(frontend, 'test-results'), { recursive: true });
+    writeFileSync(
+      resolve(frontend, 'test-results/jars.json'),
+      JSON.stringify(jarProof, null, 2) + '\n',
     );
-    for (const stream of [vite.stdout, vite.stderr])
-      stream.on('data', (chunk) => {
-        viteLog = (viteLog + chunk.toString()).slice(-262144);
-      });
-    let spawnError;
-    vite.on('error', (error) => {
-      spawnError = error;
-    });
-    const deadline = Date.now() + 30_000;
-    while (true) {
-      if (spawnError) throw spawnError;
-      if (signalExit)
-        throw new Error('E2E interrompido durante inicialização.');
-      if (
-        vite.exitCode !== null ||
-        vite.signalCode !== null ||
-        Date.now() > deadline
-      )
-        throw new Error('Vite não iniciou; consulte vite.log.');
+    for (const mode of ['normal', 'demo']) {
+      let viteLog = '';
       try {
-        if (
-          (
-            await fetch('http://127.0.0.1:5174', {
-              signal: AbortSignal.timeout(1000),
-            })
-          ).ok
-        )
-          break;
-      } catch {
-        /* Aguardar somente o processo próprio recém-iniciado. */
+        const modeEnv = {
+          ...env,
+          NEWS_E2E_MODE: mode,
+          VITE_APP_MODE: mode,
+          API_PROXY_TARGET: 'http://127.0.0.1:18080',
+        };
+        vite = spawn(
+          process.execPath,
+          [
+            resolve(frontend, 'node_modules/vite/bin/vite.js'),
+            '--port',
+            '5174',
+          ],
+          {
+            cwd: frontend,
+            env: modeEnv,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: true,
+          },
+        );
+        for (const stream of [vite.stdout, vite.stderr])
+          stream.on('data', (chunk) => {
+            viteLog = (viteLog + chunk.toString()).slice(-262144);
+          });
+        let spawnError;
+        vite.on('error', (error) => {
+          spawnError = error;
+        });
+        const deadline = Date.now() + 30_000;
+        while (true) {
+          if (spawnError) throw spawnError;
+          if (signalExit)
+            throw new Error('E2E interrompido durante inicialização.');
+          if (
+            vite.exitCode !== null ||
+            vite.signalCode !== null ||
+            Date.now() > deadline
+          )
+            throw new Error(
+              `Vite ${mode} não iniciou; consulte vite-${mode}.log.`,
+            );
+          try {
+            if (
+              (
+                await fetch('http://127.0.0.1:5174', {
+                  signal: AbortSignal.timeout(1000),
+                })
+              ).ok
+            )
+              break;
+          } catch {
+            /* Esperar o processo próprio. */
+          }
+          await delay(100);
+        }
+        child = spawn(
+          process.execPath,
+          [
+            resolve(frontend, 'node_modules/@playwright/test/cli.js'),
+            'test',
+            ...(mode === 'normal'
+              ? ['normal.spec.ts', 'normal-pending.spec.ts']
+              : ['demo.spec.ts']),
+            ...process.argv.slice(2),
+          ],
+          { cwd: frontend, env: modeEnv, stdio: 'inherit', detached: true },
+        );
+        const [code] = await once(child, 'exit');
+        if (signalExit || code || child.signalCode)
+          throw new Error(
+            `Navegador ${mode} falhou (exit ${signalExit || code || 1}).`,
+          );
+      } finally {
+        killGroup(child, 'SIGKILL');
+        try {
+          await stopProcess(vite);
+        } finally {
+          killGroup(vite, 'SIGKILL');
+          writeFileSync(
+            resolve(frontend, `test-results/vite-${mode}.log`),
+            viteLog,
+          );
+          const exited = (processToCheck) =>
+            !processToCheck?.pid ||
+            processToCheck.exitCode !== null ||
+            processToCheck.signalCode !== null;
+          allExited &&= exited(vite) && exited(child);
+        }
       }
-      await delay(100);
     }
-    child = spawn(
-      process.execPath,
-      [
-        resolve(frontend, 'node_modules/@playwright/test/cli.js'),
-        'test',
-        ...process.argv.slice(2),
-      ],
-      { cwd: frontend, env, stdio: 'inherit', detached: true },
-    );
-    const [code] = await once(child, 'exit');
-    process.exitCode = signalExit || code || (child.signalCode ? 1 : 0);
   } catch (error) {
     process.exitCode = signalExit || 1;
     console.error(error.message);
   } finally {
     clearTimeout(killTimer);
-    // Encerra também descendentes que sobreviveram a um worker cancelado.
     killGroup(child, 'SIGKILL');
-    try {
-      await stopProcess(vite);
-    } catch {
-      process.exitCode = process.exitCode || 1;
-    } finally {
-      killGroup(vite, 'SIGKILL');
-    }
+    killGroup(vite, 'SIGKILL');
     mkdirSync(resolve(frontend, 'test-results'), { recursive: true });
-    writeFileSync(resolve(frontend, 'test-results/vite.log'), viteLog);
-    const exited = (childProcess) =>
-      !childProcess?.pid ||
-      childProcess.exitCode !== null ||
-      childProcess.signalCode !== null;
     writeFileSync(
       resolve(frontend, 'test-results/processes.json'),
       JSON.stringify({
         runId,
-        viteExited: exited(vite),
-        playwrightExited: exited(child),
+        viteExited: allExited,
+        playwrightExited: allExited,
       }) + '\n',
     );
-    if (!exited(vite) || !exited(child))
-      process.exitCode = process.exitCode || 1;
+    if (!allExited) process.exitCode = process.exitCode || 1;
     try {
       cleanup();
     } catch {

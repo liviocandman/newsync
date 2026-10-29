@@ -219,10 +219,10 @@ class DemoHttpIT {
     assertThat(node(missing).get("code").asString()).isEqualTo("NOT_FOUND");
     assertThat(missing.body()).doesNotContain("SELECT", "Exception", "stackTrace");
     assertThat(get(client, "/api/v1/articles/not-uuid").statusCode()).isEqualTo(400);
-    for (String query : List.of("?cursor=x", "?read=true", "?limit=30", "?sourceId=x")) {
+    for (String query : List.of("?cursor=x", "?read=invalid", "?limit=0", "?sourceId=x")) {
       var response = get(client, "/api/v1/articles" + query);
       assertThat(response.statusCode()).isEqualTo(400);
-      assertThat(node(response).get("code").asString()).isEqualTo("UNSUPPORTED_PARAMETERS");
+      assertThat(node(response).get("code").asString()).isEqualTo("INVALID_REQUEST");
     }
     var read = node(patch(client, id, "{\"read\":true}", csrf, "http://127.0.0.1:5173"));
     var repeat = node(patch(client, id, "{\"read\":true}", csrf, "http://127.0.0.1:5173"));
@@ -275,5 +275,34 @@ class DemoHttpIT {
     assertThat(detail.get("saved").asBoolean()).isTrue();
     assertThat(detail.get("readAt").isNull()).isFalse();
     assertThat(detail.get("savedAt").isNull()).isFalse();
+  }
+
+  @Test
+  void demoRejectsRegistrationExternalRefreshAndSourceLifecycle() throws Exception {
+    try (var client = client()) {
+      var csrf = node(get(client, "/api/v1/auth/csrf"));
+      String source = jdbc.sql("SELECT id::text FROM sources").query(String.class).single();
+      var before = jdbc.sql("SELECT * FROM sources").query().listOfRows();
+      for (String[] operation :
+          List.of(
+              new String[] {"POST", "/sources", "{\"feedUrl\":\"https://example.org/feed\"}"},
+              new String[] {"PATCH", "/sources/" + source, "{\"state\":\"paused\"}"},
+              new String[] {"DELETE", "/sources/" + source, ""},
+              new String[] {"POST", "/sources/" + source + "/refresh", ""})) {
+        var response =
+            client.send(
+                HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + port + "/api/v1" + operation[1]))
+                    .header("Origin", "http://127.0.0.1:5173")
+                    .header("Content-Type", "application/json")
+                    .header(csrf.get("headerName").asString(), csrf.get("token").asString())
+                    .method(operation[0], HttpRequest.BodyPublishers.ofString(operation[2]))
+                    .build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(node(response).get("code").asString()).isEqualTo("FORBIDDEN");
+      }
+      assertThat(jdbc.sql("SELECT * FROM sources").query().listOfRows()).isEqualTo(before);
+    }
   }
 }

@@ -4,13 +4,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App';
-import { api, type Article } from './api';
+import { api, type Article, type Source } from './api';
 vi.mock('./api', () => ({
   api: {
     articles: vi.fn(),
     sources: vi.fn(),
     article: vi.fn(),
     state: vi.fn(),
+    createSource: vi.fn(),
+    updateSource: vi.fn(),
+    archiveSource: vi.fn(),
+    refreshSource: vi.fn(),
   },
 }));
 const article: Article = {
@@ -27,6 +31,18 @@ const article: Article = {
   contentText: 'Um texto próprio.',
   contentOrigin: 'feed',
   completeness: 'unknown',
+};
+const source: Source = {
+  id: 's',
+  title: 'Minha fonte',
+  feedUrl: 'https://example.org/rss',
+  state: 'active',
+  lastResult: 'never',
+  lastSuccessAt: null,
+  lastAttemptAt: null,
+  manualRequestedAt: null,
+  retryAfterAt: null,
+  diagnostic: null,
 };
 function show(path = '/') {
   return render(
@@ -111,4 +127,72 @@ it('expõe falha de leitura e permite repetir', async () => {
   expect(
     await screen.findByRole('link', { name: /Texto de teste/ }),
   ).toBeInTheDocument();
+});
+it('cadastro confirma a fonte pendente sem solicitar importação', async () => {
+  vi.mocked(api.createSource).mockImplementation(async () => {
+    vi.mocked(api.sources).mockResolvedValue([source]);
+    return source;
+  });
+  show('/sources');
+  expect(await screen.findByText('Leitor pessoal local')).toBeInTheDocument();
+  await userEvent.type(
+    screen.getByLabelText('URL do feed'),
+    'https://example.org/rss',
+  );
+  await userEvent.type(
+    screen.getByLabelText('Título (opcional)'),
+    'Minha fonte',
+  );
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Cadastrar fonte' }),
+  );
+  expect(
+    await screen.findByText(
+      'Fonte cadastrada. Peça a importação para receber artigos.',
+    ),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByText('Pendente; nenhuma importação concluída.'),
+  ).toBeInTheDocument();
+  expect(api.createSource).toHaveBeenCalledWith({
+    feedUrl: 'https://example.org/rss',
+    title: 'Minha fonte',
+  });
+  expect(api.refreshSource).not.toHaveBeenCalled();
+});
+it('falha ao pausar conserva a fonte ativa e permite uma nova ação', async () => {
+  vi.mocked(api.sources).mockResolvedValue([source]);
+  vi.mocked(api.updateSource).mockRejectedValue(
+    new Error('Gravação indisponível.'),
+  );
+  show('/sources');
+  await userEvent.click(await screen.findByRole('button', { name: 'Pausar' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Gravação indisponível.',
+  );
+  expect(screen.getByText('Ativa', { exact: true })).toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Reativar' }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Pausar' })).toBeEnabled();
+});
+it('filtro novo descarta cursor anterior e usa valores declarativos', async () => {
+  vi.mocked(api.articles).mockResolvedValue({
+    items: [article],
+    nextCursor: 'page-2',
+  });
+  show();
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Próxima página' }),
+  );
+  expect(api.articles).toHaveBeenLastCalledWith({ cursor: 'page-2' });
+  await userEvent.selectOptions(
+    screen.getByLabelText('Filtrar por leitura'),
+    'false',
+  );
+  expect(api.articles).toHaveBeenLastCalledWith({
+    read: false,
+    cursor: undefined,
+  });
+  expect(screen.getByText('Página 1', { exact: true })).toBeInTheDocument();
 });

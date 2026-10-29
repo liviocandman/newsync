@@ -1,141 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
-import { stopProcess } from './support/stop-process.ts';
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { createServer } from 'node:net';
-import { once } from 'node:events';
-import { join, resolve } from 'node:path';
-import { createWriteStream, mkdirSync } from 'node:fs';
-import { createInterface } from 'node:readline';
-
-const image =
-  'postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db';
-const container = `news-b00-e2e-${randomUUID()}`;
-const password = randomUUID();
-let containerCreated = false;
-let backend: ChildProcess | undefined;
-let jdbcUrl = '';
-let backendLog: ReturnType<typeof createWriteStream>;
-function docker(...args: string[]) {
-  return execFileSync('docker', args, {
-    encoding: 'utf8',
-    timeout: 120_000,
-    env: { ...process.env, POSTGRES_PASSWORD: password },
-  }).trim();
-}
-async function stopBackend() {
-  await stopProcess(backend);
-}
-async function startBackend() {
-  const java = process.env.JAVA_HOME
-    ? join(
-        process.env.JAVA_HOME,
-        'bin',
-        process.platform === 'win32' ? 'java.exe' : 'java',
-      )
-    : 'java';
-  backend = spawn(
-    java,
-    [
-      '-jar',
-      resolve('../backend/target/news.jar'),
-      '--spring.profiles.active=demo',
-      '--server.port=18080',
-    ],
-    {
-      env: {
-        ...process.env,
-        JDBC_URL: jdbcUrl,
-        JDBC_USERNAME: 'b00_test',
-        JDBC_PASSWORD: password,
-        APP_BASE_URL: 'http://127.0.0.1:5174',
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-  for (const stream of [backend.stdout!, backend.stderr!]) {
-    createInterface({ input: stream }).on('line', (line) =>
-      backendLog.write(line.replaceAll(password, '[redacted]') + '\n'),
-    );
-  }
-  backend.on('error', (error) => backendLog.write(String(error)));
-  await expect
-    .poll(
-      async () => {
-        if (backend?.exitCode !== null)
-          throw new Error(
-            'Backend encerrou. Consulte backend.log; compile com -Pdemo.',
-          );
-        try {
-          return (await fetch('http://127.0.0.1:18080/health/ready')).status;
-        } catch {
-          return 0;
-        }
-      },
-      { timeout: 60_000, intervals: [100, 250, 500] },
-    )
-    .toBe(200);
-}
+import { TestBackend } from './support/backend.ts';
+const backend = new TestBackend('demo');
 test.beforeAll(async () => {
-  // Evita conectar acidentalmente a um serviço preexistente na porta de teste.
-  const probe = createServer();
-  probe.listen(18080, '127.0.0.1');
-  await once(probe, 'listening');
-  await new Promise<void>((resolve, reject) =>
-    probe.close((error) => (error ? reject(error) : resolve())),
-  );
-  mkdirSync('test-results', { recursive: true });
-  backendLog = createWriteStream('test-results/backend.log', { flags: 'a' });
-  docker(
-    'run',
-    '--detach',
-    '--rm',
-    '--name',
-    container,
-    '--label',
-    `news.f02.run=${process.env.NEWS_E2E_RUN_ID}`,
-    '--publish',
-    '127.0.0.1::5432',
-    '--tmpfs',
-    '/var/lib/postgresql',
-    '--env',
-    'POSTGRES_DB=news_b00_e2e',
-    '--env',
-    'POSTGRES_USER=b00_test',
-    '--env',
-    'POSTGRES_PASSWORD',
-    '--health-cmd',
-    'pg_isready -U b00_test -d news_b00_e2e',
-    '--health-interval',
-    '1s',
-    '--health-timeout',
-    '3s',
-    '--health-retries',
-    '30',
-    image,
-  );
-  containerCreated = true;
-  await expect
-    .poll(
-      () =>
-        docker('inspect', '--format', '{{.State.Health.Status}}', container),
-      { timeout: 45_000 },
-    )
-    .toBe('healthy');
-  const mapped = docker('port', container, '5432/tcp').split(':').at(-1);
-  jdbcUrl = `jdbc:postgresql://127.0.0.1:${mapped}/news_b00_e2e`;
-  await startBackend();
+  await backend.create();
 });
 test.afterAll(async () => {
-  try {
-    await stopBackend();
-  } finally {
-    try {
-      if (containerCreated) docker('rm', '--force', container);
-    } finally {
-      backendLog?.end();
-    }
-  }
+  await backend.dispose();
 });
 
 async function expectSafeBody(page: Page, external: string[]) {
@@ -183,6 +53,10 @@ test('abrir → marcar → recarregar → reiniciar preserva estados e bloqueia 
       external.push(request.url());
   });
   await page.goto('/');
+  await expect(page.getByText('Demonstração local · B-00')).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: 'Gerenciar fontes' }),
+  ).toHaveCount(0);
   await page.getByRole('link', { name: /Uma horta na janela/ }).click();
   await expect(
     page.getByRole('heading', { name: 'Uma horta na janela' }),
@@ -209,9 +83,19 @@ test('abrir → marcar → recarregar → reiniciar preserva estados e bloqueia 
   await expect(
     page.getByRole('button', { name: 'Remover dos salvos' }),
   ).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Remover dos salvos' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Salvar artigo', exact: true }),
+  ).toBeEnabled();
+  await page
+    .getByRole('button', { name: 'Salvar artigo', exact: true })
+    .click();
+  await expect(
+    page.getByRole('button', { name: 'Remover dos salvos' }),
+  ).toBeEnabled();
   const articleUrl = page.url();
-  await stopBackend();
-  await startBackend();
+  await backend.stop();
+  await backend.start();
   // A página ainda possui o token e cookie anteriores ao restart.
   await page.getByRole('button', { name: 'Remover dos salvos' }).click();
   await expect(

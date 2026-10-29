@@ -24,11 +24,36 @@ export type Article = Summary &
 export type Source = {
   id: string;
   title: string;
-  lastResult: string;
+  feedUrl: string;
+  state: 'active' | 'paused' | 'archived';
+  lastResult: 'never' | 'success' | 'not_modified' | 'partial' | 'failed';
   lastSuccessAt: string | null;
+  lastAttemptAt: string | null;
+  manualRequestedAt: string | null;
+  retryAfterAt: string | null;
+  diagnostic: { code: string; message: string; ignoredItems: number } | null;
 };
+export type Filters = {
+  sourceId?: string;
+  read?: boolean;
+  saved?: boolean;
+  limit?: number;
+  cursor?: string;
+};
+export type ArticlePage = { items: Summary[]; nextCursor: string | null };
 type Csrf = { token: string; headerName: string };
 let csrf: Promise<Csrf> | undefined;
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public code?: string,
+    public retryAfter?: string | null,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`/api/v1${path}`, {
     credentials: 'same-origin',
@@ -36,23 +61,27 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     let message = `Não foi possível concluir a operação (${response.status}).`;
+    let code: string | undefined;
     try {
-      const error = await response.json();
-      if (typeof error.message === 'string') message = error.message;
+      const error: unknown = await response.json();
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string')
+          message = error.message;
+        if ('code' in error && typeof error.code === 'string')
+          code = error.code;
+      }
     } catch {
       /* Resposta sem JSON. */
     }
-    throw new ApiError(message, response.status);
+    throw new ApiError(
+      message,
+      response.status,
+      code,
+      response.headers.get('Retry-After'),
+    );
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
-}
-class ApiError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-  ) {
-    super(message);
-  }
 }
 function token() {
   return (csrf ??= request<Csrf>('/auth/csrf').catch((error) => {
@@ -60,40 +89,63 @@ function token() {
     throw error;
   }));
 }
+async function write<T>(
+  path: string,
+  method: string,
+  payload?: unknown,
+): Promise<T> {
+  // Serializar uma vez mantém o mesmo comando declarativo durante a recuperação.
+  const body = payload === undefined ? undefined : JSON.stringify(payload);
+  for (let attempt = 0; ; attempt++) {
+    const current = await token();
+    try {
+      return await request<T>(path, {
+        method,
+        headers: {
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          [current.headerName]: current.token,
+        },
+        body,
+      });
+    } catch (error) {
+      if (
+        attempt === 0 &&
+        error instanceof ApiError &&
+        error.status === 403 &&
+        error.code === 'CSRF_INVALID'
+      ) {
+        csrf = undefined;
+        continue;
+      }
+      throw error;
+    }
+  }
+}
 export const api = {
-  articles: () => request<{ items: Summary[]; nextCursor: null }>('/articles'),
+  articles: (filters: Filters = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== '') query.set(key, String(value));
+    }
+    return request<ArticlePage>(`/articles${query.size ? `?${query}` : ''}`);
+  },
   sources: () => request<Source[]>('/sources'),
+  source: (id: string) => request<Source>(`/sources/${encodeURIComponent(id)}`),
+  createSource: (payload: { feedUrl: string; title?: string }) =>
+    write<Source>('/sources', 'POST', payload),
+  updateSource: (
+    id: string,
+    patch: { title?: string; state?: Source['state'] },
+  ) => write<Source>(`/sources/${encodeURIComponent(id)}`, 'PATCH', patch),
+  archiveSource: (id: string) =>
+    write<void>(`/sources/${encodeURIComponent(id)}`, 'DELETE'),
+  refreshSource: (id: string) =>
+    write<{ status: 'scheduled' | 'collecting' }>(
+      `/sources/${encodeURIComponent(id)}/refresh`,
+      'POST',
+    ),
   article: (id: string) =>
     request<Article>(`/articles/${encodeURIComponent(id)}`),
-  async state(
-    id: string,
-    patch: Partial<Pick<State, 'read' | 'saved'>>,
-  ): Promise<State> {
-    for (let attempt = 0; ; attempt++) {
-      const current = await token();
-      try {
-        return await request<State>(
-          `/articles/${encodeURIComponent(id)}/state`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              [current.headerName]: current.token,
-            },
-            body: JSON.stringify(patch),
-          },
-        );
-      } catch (error) {
-        if (
-          attempt === 0 &&
-          error instanceof ApiError &&
-          error.status === 403
-        ) {
-          csrf = undefined;
-          continue;
-        }
-        throw error;
-      }
-    }
-  },
+  state: (id: string, patch: Partial<Pick<State, 'read' | 'saved'>>) =>
+    write<State>(`/articles/${encodeURIComponent(id)}/state`, 'PATCH', patch),
 };
