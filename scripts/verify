@@ -96,6 +96,9 @@ def main():
                         if properties is not None:
                             tree.getroot().remove(properties)
                         tree.write(path, encoding="utf-8", xml_declaration=True)
+            t20 = ROOT / "backend/target/t20-result.json"
+            if t20.exists():
+                shutil.copy2(t20, destination / t20.name)
             scanner = ROOT / "backend/target/spotbugsXml.xml"
             if scanner.exists():
                 shutil.copy2(scanner, destination / scanner.name)
@@ -124,6 +127,9 @@ def main():
                 finally:
                     destination = archive_backend(profile)
                 summary["results"][profile] = reports.backend(destination)
+                t20 = json.loads((destination / "t20-result.json").read_text())
+                reports.require(t20.get("status") == "passed" and t20.get("toolExits"), "Prova T-20 ausente/incompleta")
+                summary["results"][profile]["backupRestore"] = t20
                 reports.require((destination / "spotbugsXml.xml").is_file(), "Relatório SpotBugs/FindSecBugs ausente")
                 summary["results"][profile]["staticAnalysis"] = "SpotBugs/FindSecBugs passed"
                 shutil.copy2(ROOT / "backend/target/news.jar", destination / "news.jar")

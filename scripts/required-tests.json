@@ -121,6 +121,9 @@
       "t12EditorialCommitPreservesBodyReplacesTermsAndRollsBackWithPersonalConcurrency": 1,
       "t12TenPersistedSearchesAndSimpleLinguisticLimits": 1,
       "t12V002BackfillPreservesOldDataAndBuildsGinOnControlledCorpus": 1
+    },
+    "br.com.agregador.BackupRestoreIT": {
+      "t20RestoresCompleteArchiveRejectsUnsafeRecoveryAndResumesDurableCollection": 1
     }
   },
   "vitest": {
