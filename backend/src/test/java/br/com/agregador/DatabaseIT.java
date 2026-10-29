@@ -185,7 +185,7 @@ class DatabaseIT {
             jdbc.sql("select count(*) from flyway_schema_history where success")
                 .query(Long.class)
                 .single())
-        .isEqualTo(2);
+        .isEqualTo(3);
     assertThat(jdbc.sql("select count(*) from sources").query(Long.class).single()).isZero();
   }
 
@@ -419,7 +419,8 @@ class DatabaseIT {
           .defaultSchema(schema)
           .load()
           .migrate();
-      assertThat(migrated.sql("SELECT * FROM articles").query().singleRow()).isEqualTo(before);
+      assertThat(migrated.sql("SELECT * FROM articles").query().singleRow())
+          .containsAllEntriesOf(before);
       assertThat(
               migrated
                   .sql("SELECT next_poll_at,manual_requested_at,last_result FROM sources")
@@ -437,7 +438,7 @@ class DatabaseIT {
                       "SELECT count(*) FROM flyway_schema_history WHERE success AND version IS NOT NULL")
                   .query(Long.class)
                   .single())
-          .isEqualTo(2);
+          .isEqualTo(3);
     } finally {
       jdbc.sql("DROP SCHEMA IF EXISTS " + schema + " CASCADE").update();
     }

@@ -128,8 +128,9 @@ public class IngestionRepository {
             jdbc.sql(
                 """
         INSERT INTO articles(id,source_id,dedup_key,external_id,title,original_url,normalized_article_url,author,
-          content_html,content_text,published_at,sort_at,first_seen_at,last_seen_at,updated_at)
-        VALUES (:id,:source,:key,:external,:title,:url,:normalized,:author,:html,:text,:published,:sort,:now,:now,:now)
+          content_html,content_text,published_at,sort_at,first_seen_at,last_seen_at,updated_at,search_document)
+        VALUES (:id,:source,:key,:external,:title,:url,:normalized,:author,:html,:text,:published,:sort,:now,:now,:now,
+          setweight(to_tsvector('simple',:title),'A') || setweight(to_tsvector('simple',coalesce(:text,'')),'B'))
         """),
             item,
             key,
@@ -147,7 +148,9 @@ public class IngestionRepository {
         UPDATE articles SET dedup_key=:key,external_id=coalesce(:external,external_id),title=:title,
           original_url=coalesce(:url,original_url),normalized_article_url=coalesce(:normalized,normalized_article_url),
           author=coalesce(:author,author),content_html=coalesce(:html,content_html),content_text=coalesce(:text,content_text),
-          published_at=coalesce(:published,published_at),last_seen_at=:now,updated_at=:now
+          published_at=coalesce(:published,published_at),last_seen_at=:now,updated_at=:now,
+          search_document=setweight(to_tsvector('simple',:title),'A') ||
+            setweight(to_tsvector('simple',coalesce(:text,content_text,'')),'B')
         WHERE id=:id
         """),
             item,

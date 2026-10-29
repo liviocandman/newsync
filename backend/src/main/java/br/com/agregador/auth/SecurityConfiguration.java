@@ -57,6 +57,7 @@ public class SecurityConfiguration {
                   "/api/v1/sources",
                   "/api/v1/sources/{id}",
                   "/api/v1/articles",
+                  "/api/v1/search",
                   "/api/v1/articles/{id}")
               .permitAll();
           auth.requestMatchers(HttpMethod.PATCH, "/api/v1/articles/{id}/state").permitAll();

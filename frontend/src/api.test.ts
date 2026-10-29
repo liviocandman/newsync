@@ -137,3 +137,33 @@ it('serializa filtros e cursor e aceita arquivamento 204', async () => {
     .mockResolvedValueOnce(new Response(null, { status: 204 }));
   await expect(api.archiveSource('s')).resolves.toBeUndefined();
 });
+
+it('serializa toda a busca e GET recusado não recupera CSRF', async () => {
+  fetchMock.mockResolvedValueOnce(json({ items: [], hasMore: false }));
+  const filters = {
+    q: 'Java & CSRF',
+    sourceId: 's',
+    from: '2026-10-27T00:00:00Z',
+    to: '2026-10-28T00:00:00Z',
+    limit: 10,
+    offset: 20,
+  };
+  await expect(api.search(filters)).resolves.toEqual({
+    items: [],
+    hasMore: false,
+  });
+  expect(fetchMock.mock.calls[0][0]).toBe(
+    '/api/v1/search?q=Java+%26+CSRF&sourceId=s&from=2026-10-27T00%3A00%3A00Z&to=2026-10-28T00%3A00%3A00Z&limit=10&offset=20',
+  );
+  fetchMock.mockResolvedValueOnce(error('CSRF_INVALID'));
+  await expect(api.search(filters)).rejects.toMatchObject({
+    status: 403,
+    code: 'CSRF_INVALID',
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(
+    fetchMock.mock.calls.every(([url]) =>
+      String(url).startsWith('/api/v1/search?'),
+    ),
+  ).toBe(true);
+});

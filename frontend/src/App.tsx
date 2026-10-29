@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Link, Route, Routes, useParams } from 'react-router-dom';
+import {
+  Link,
+  Route,
+  Routes,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom';
 import {
   api,
   type Article,
@@ -8,6 +14,7 @@ import {
   type State,
   type Filters,
 } from './api';
+import { SearchResults } from './Search';
 import styles from './App.module.css';
 
 const demo = import.meta.env.VITE_APP_MODE === 'demo';
@@ -127,6 +134,9 @@ export function App() {
               ? 'Textos para experimentar seu leitor.'
               : 'Suas fontes, no seu tempo.'}
           </p>
+          <Link className={styles.manageLink} to="/search">
+            Buscar no acervo
+          </Link>
           {sources.isPending ? (
             <p role="status">Carregando fontes…</p>
           ) : sources.isError ? (
@@ -283,6 +293,7 @@ export function App() {
         </aside>
         <main className={styles.main}>
           <Routes>
+            <Route path="/search/*" element={<SearchScreen />} />
             <Route path="/articles/:id" element={<Reader />} />
             {!demo && <Route path="/sources" element={<SourcesScreen />} />}
             <Route
@@ -312,6 +323,23 @@ export function App() {
         </main>
       </div>
     </div>
+  );
+}
+function SearchScreen() {
+  const [params] = useSearchParams();
+  return (
+    <Routes>
+      <Route
+        path="articles/:id"
+        element={
+          <>
+            <Link to={`/search?${params}`}>Voltar à busca</Link>
+            <Reader />
+          </>
+        }
+      />
+      <Route path="*" element={<SearchResults />} />
+    </Routes>
   );
 }
 function SourcesScreen() {
@@ -637,6 +665,7 @@ function ArticleReader({ id }: { id: string }) {
       );
       await Promise.all([
         client.invalidateQueries({ queryKey: ['articles'] }),
+        client.invalidateQueries({ queryKey: ['search'] }),
         client.invalidateQueries({ queryKey: ['article', id] }),
       ]);
     },

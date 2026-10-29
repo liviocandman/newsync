@@ -100,6 +100,35 @@ public class ArticleRepository {
         .orElseThrow(NoSuchElementException::new);
   }
 
+  public List<Summary> search(SearchRequest request) {
+    var conditions = new ArrayList<String>();
+    var values = new HashMap<String, Object>();
+    conditions.add("numnode(query)>0 AND search_document @@ query");
+    values.put("q", request.q());
+    if (request.sourceId() != null) {
+      conditions.add("source_id=:source");
+      values.put("source", request.sourceId());
+    }
+    if (request.from() != null) {
+      conditions.add("sort_at>=:from");
+      values.put("from", request.from());
+    }
+    if (request.to() != null) {
+      conditions.add("sort_at<:to");
+      values.put("to", request.to());
+    }
+    values.put("limit", request.limit() + 1);
+    values.put("offset", request.offset());
+    return jdbc.sql(
+            "SELECT id,source_id,title,published_at,read_at IS NOT NULL AS read,saved_at IS NOT NULL AS saved"
+                + " FROM articles CROSS JOIN plainto_tsquery('simple',:q) query WHERE "
+                + String.join(" AND ", conditions)
+                + " ORDER BY ts_rank(search_document,query) DESC,sort_at DESC,id DESC LIMIT :limit OFFSET :offset")
+        .params(values)
+        .query(Summary.class)
+        .list();
+  }
+
   public State setState(UUID id, Map<String, Object> patch) {
     var assignments = new ArrayList<String>();
     for (String field : List.of("read", "saved")) {

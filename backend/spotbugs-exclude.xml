@@ -5,6 +5,7 @@
   <Match>
     <Or>
       <Class name="br.com.agregador.articles.ArticleController"/>
+      <Class name="br.com.agregador.articles.SearchController"/>
       <Class name="br.com.agregador.articles.ArticleService"/>
       <Class name="br.com.agregador.ingestion.CollectionWriter"/>
       <Class name="br.com.agregador.ingestion.DemoInitializer"/>

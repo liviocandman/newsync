@@ -45,6 +45,15 @@ export type Filters = {
   cursor?: string;
 };
 export type ArticlePage = { items: Summary[]; nextCursor: string | null };
+export type SearchFilters = {
+  q: string;
+  sourceId?: string;
+  from?: string;
+  to?: string;
+  limit: number;
+  offset: number;
+};
+export type SearchPage = { items: Summary[]; hasMore: boolean };
 type Csrf = { token: string; headerName: string };
 let csrf: Promise<Csrf> | undefined;
 export class ApiError extends Error {
@@ -126,6 +135,13 @@ async function write<T>(
   }
 }
 export const api = {
+  search: (filters: SearchFilters, signal?: AbortSignal) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== '') query.set(key, String(value));
+    }
+    return request<SearchPage>(`/search?${query}`, { signal });
+  },
   articles: (filters: Filters = {}) => {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(filters)) {

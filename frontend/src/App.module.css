@@ -339,7 +339,7 @@
 }
 .manageLink {
   display: inline-block;
-  margin: 10px 0 14px;
+  margin: 10px 12px 14px 0;
   font-size: 13px;
   text-underline-offset: 4px;
 }
@@ -357,6 +357,7 @@
   color: #607368;
 }
 .filters select,
+.sourceForm select,
 .sourceForm input,
 .renameForm input {
   width: 100%;

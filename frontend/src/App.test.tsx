@@ -8,6 +8,7 @@ import { api, type Article, type Source } from './api';
 vi.mock('./api', () => ({
   api: {
     articles: vi.fn(),
+    search: vi.fn(),
     sources: vi.fn(),
     article: vi.fn(),
     state: vi.fn(),
@@ -73,6 +74,7 @@ beforeEach(() => {
   });
   vi.mocked(api.sources).mockResolvedValue([]);
   vi.mocked(api.article).mockResolvedValue(article);
+  vi.mocked(api.search).mockResolvedValue({ items: [], hasMore: false });
 });
 afterEach(() => vi.resetAllMocks());
 it('mantém o estado anterior quando uma gravação falha', async () => {
@@ -394,4 +396,182 @@ it('atualiza o leitor quando a primeira consulta da fonte nova já observa concl
   );
   await screen.findByText('Importação concluída.');
   expect(api.articles).toHaveBeenCalledTimes(before + 1);
+});
+
+it('busca só no envio e reinicia offset ao alterar termos fonte e período', async () => {
+  vi.mocked(api.sources).mockResolvedValue([{ ...source, state: 'archived' }]);
+  show('/search?q=CPU&limit=10&offset=20');
+  await screen.findByText('Nenhum resultado para esta pesquisa.');
+  expect(api.search).toHaveBeenLastCalledWith(
+    expect.objectContaining({ q: 'CPU', limit: 10, offset: 20 }),
+    expect.anything(),
+  );
+  const calls = vi.mocked(api.search).mock.calls.length;
+  await userEvent.clear(screen.getByLabelText('Termos da busca'));
+  await userEvent.type(screen.getByLabelText('Termos da busca'), 'Java CSRF');
+  await userEvent.selectOptions(screen.getByLabelText('Fonte da busca'), 's');
+  // Disparar change representa o valor completo de um controle datetime-local.
+  const { fireEvent } = await import('@testing-library/react');
+  fireEvent.change(screen.getByLabelText('A partir de'), {
+    target: { value: '2026-10-27T09:00' },
+  });
+  fireEvent.change(screen.getByLabelText('Antes de'), {
+    target: { value: '2026-10-28T09:00' },
+  });
+  expect(api.search).toHaveBeenCalledTimes(calls);
+  await userEvent.click(screen.getByRole('button', { name: 'Pesquisar' }));
+  await screen.findByText('Nenhum resultado para esta pesquisa.');
+  expect(api.search).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      q: 'Java CSRF',
+      sourceId: 's',
+      offset: 0,
+      from: new Date('2026-10-27T09:00').toISOString(),
+      to: new Date('2026-10-28T09:00').toISOString(),
+    }),
+    expect.anything(),
+  );
+});
+
+it('busca mostra carregamento vazio erro e permite repetição explícita', async () => {
+  let finish!: (value: { items: Article[]; hasMore: boolean }) => void;
+  vi.mocked(api.search).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  show('/search?q=CPU');
+  expect(await screen.findByText('Pesquisando…')).toBeVisible();
+  await act(async () => finish({ items: [], hasMore: false }));
+  expect(
+    await screen.findByText('Nenhum resultado para esta pesquisa.'),
+  ).toBeVisible();
+  vi.mocked(api.search).mockRejectedValueOnce(new Error('Busca indisponível.'));
+  await userEvent.click(screen.getByRole('button', { name: 'Pesquisar' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Busca indisponível.',
+  );
+  expect(screen.getByLabelText('Termos da busca')).toHaveValue('CPU');
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Repetir pesquisa' }),
+  );
+  expect(
+    await screen.findByText('Nenhum resultado para esta pesquisa.'),
+  ).toBeVisible();
+});
+
+it('busca conserva página filtros e marcações ao abrir detalhe e voltar', async () => {
+  let saved = false;
+  vi.mocked(api.search).mockImplementation(async () => ({
+    items: [{ ...article, saved }],
+    hasMore: true,
+  }));
+  vi.mocked(api.state).mockImplementation(async () => {
+    saved = true;
+    const marked = { ...article, saved: true, savedAt: '2026-10-29T12:00:00Z' };
+    vi.mocked(api.article).mockResolvedValue(marked);
+    return marked;
+  });
+  show('/search?q=CPU&sourceId=s&limit=10&offset=10');
+  const list = await screen.findByRole('navigation', {
+    name: 'Resultados da busca',
+  });
+  const { within } = await import('@testing-library/react');
+  const link = within(list).getByRole('link', { name: /Texto de teste/ });
+  expect(link).toHaveAttribute(
+    'href',
+    '/search/articles/a?q=CPU&sourceId=s&limit=10&offset=10',
+  );
+  await userEvent.click(link);
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Salvar artigo' }),
+  );
+  await screen.findByRole('button', { name: 'Remover dos salvos' });
+  await userEvent.click(screen.getByRole('link', { name: 'Voltar à busca' }));
+  expect(await screen.findByText('Página 2', { exact: true })).toBeVisible();
+  expect(
+    within(
+      await screen.findByRole('navigation', { name: 'Resultados da busca' }),
+    ).getByText('Não lido · Salvo'),
+  ).toBeVisible();
+  expect(api.search).toHaveBeenLastCalledWith(
+    expect.objectContaining({ q: 'CPU', sourceId: 's', offset: 10 }),
+    expect.anything(),
+  );
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Próximos resultados' }),
+  );
+  expect(api.search).toHaveBeenLastCalledWith(
+    expect.objectContaining({ offset: 20 }),
+    expect.anything(),
+  );
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Resultados anteriores' }),
+  );
+  expect(api.search).toHaveBeenLastCalledWith(
+    expect.objectContaining({ offset: 10 }),
+    expect.anything(),
+  );
+});
+
+it('resposta atrasada da busca anterior não substitui a pesquisa atual', async () => {
+  let finish!: (value: { items: Article[]; hasMore: boolean }) => void;
+  vi.mocked(api.search).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  show('/search?q=antiga');
+  await userEvent.clear(screen.getByLabelText('Termos da busca'));
+  await userEvent.type(screen.getByLabelText('Termos da busca'), 'nova');
+  await userEvent.click(screen.getByRole('button', { name: 'Pesquisar' }));
+  await screen.findByText('Nenhum resultado para esta pesquisa.');
+  await act(async () => finish({ items: [article], hasMore: false }));
+  expect(
+    screen.getByText('Nenhum resultado para esta pesquisa.'),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole('navigation', { name: 'Resultados da busca' }),
+  ).not.toBeInTheDocument();
+});
+
+it('conclusão da coleta invalida busca sem conservar metadados editoriais antigos', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(api.sources).mockResolvedValue([source]);
+    vi.mocked(api.search).mockResolvedValue({
+      items: [article],
+      hasMore: false,
+    });
+    show('/search?q=CPU');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    const before = vi.mocked(api.search).mock.calls.length;
+    vi.mocked(api.sources).mockResolvedValue([
+      {
+        ...source,
+        lastResult: 'success',
+        lastSuccessAt: '2026-10-29T12:01:00Z',
+        nextPollAt: '2026-10-29T12:31:00Z',
+      },
+    ]);
+    vi.mocked(api.search).mockResolvedValue({
+      items: [{ ...article, title: 'Título corrigido' }],
+      hasMore: false,
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5100);
+    });
+    expect(api.search).toHaveBeenCalledTimes(before + 1);
+    expect(
+      screen.getByRole('navigation', { name: 'Resultados da busca' }),
+    ).toHaveTextContent('Título corrigido');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5100);
+    });
+    expect(api.search).toHaveBeenCalledTimes(before + 1);
+  } finally {
+    vi.useRealTimers();
+  }
 });

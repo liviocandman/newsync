@@ -74,7 +74,8 @@
       "detailContractForBodyAbsentBodyAndPreservedBody": 1,
       "validatesStateCsrfOriginIdsAndUnsupportedParameters": 1,
       "t11ConcurrentIndependentHttpPatchesPreserveBothFields": 1,
-      "demoRejectsRegistrationExternalRefreshAndSourceLifecycle": 1
+      "demoRejectsRegistrationExternalRefreshAndSourceLifecycle": 1,
+      "demoSearchesOnlyItsPersistedFixtureWithoutCsrf": 1
     },
     "br.com.agregador.MigrationFailureIT": {
       "migrationFailurePreventsDemoReadiness": 1
@@ -113,6 +114,13 @@
     },
     "br.com.agregador.ingestion.AutomaticCollectionIT": {
       "realHttpAutomaticCollectionCommitsConditionalResultsRetryAfterAndPersonalStates": 1
+    },
+    "br.com.agregador.SearchIT": {
+      "t12HttpValidatesEveryParameterWithoutCsrfNetworkOrQueryLeakage": 1,
+      "t12RanksTitleFiltersSortAtAndPaginatesStaticTies": 1,
+      "t12EditorialCommitPreservesBodyReplacesTermsAndRollsBackWithPersonalConcurrency": 1,
+      "t12TenPersistedSearchesAndSimpleLinguisticLimits": 1,
+      "t12V002BackfillPreservesOldDataAndBuildsGinOnControlledCorpus": 1
     }
   },
   "vitest": {
@@ -129,7 +137,12 @@
       "coleta desabilitada explicita o estado e não mantém polling",
       "mostra atividade, aviso parcial e o maior horário de elegibilidade",
       "refresh recusado conserva diagnóstico e não confirma pedido",
-      "atualiza o leitor quando a primeira consulta da fonte nova já observa conclusão"
+      "atualiza o leitor quando a primeira consulta da fonte nova já observa conclusão",
+      "busca só no envio e reinicia offset ao alterar termos fonte e período",
+      "busca mostra carregamento vazio erro e permite repetição explícita",
+      "busca conserva página filtros e marcações ao abrir detalhe e voltar",
+      "resposta atrasada da busca anterior não substitui a pesquisa atual",
+      "conclusão da coleta invalida busca sem conservar metadados editoriais antigos"
     ],
     "tests/stop-process.test.ts": [
       "cancela o prazo de A e mantém B vivo depois do prazo antigo",
@@ -147,7 +160,8 @@
       "403 sem código não renova nem repete",
       "erro de rede não renova nem repete",
       "falha no primeiro GET CSRF não envia PATCH e permite nova ação explícita",
-      "serializa filtros e cursor e aceita arquivamento 204"
+      "serializa filtros e cursor e aceita arquivamento 204",
+      "serializa toda a busca e GET recusado não recupera CSRF"
     ]
   },
   "playwright": {
@@ -155,7 +169,8 @@
     "normal": [
       "normal vazio → fonte pendente → leitura → restart recupera CSRF uma vez → ciclo da fonte",
       "pedido manual e cooldown sobrevivem ao restart com banco próprio",
-      "agenda automática apresenta diagnóstico sem pedido manual"
+      "agenda automática apresenta diagnóstico sem pedido manual",
+      "busca no acervo → filtro e página → detalhe e marcação → volta com contexto"
     ]
   }
 }

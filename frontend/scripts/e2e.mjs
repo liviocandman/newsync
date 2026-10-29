@@ -185,7 +185,12 @@ if (process.argv.includes('--cleanup')) {
             resolve(frontend, 'node_modules/@playwright/test/cli.js'),
             'test',
             ...(mode === 'normal'
-              ? ['normal.spec.ts', 'normal-pending.spec.ts', 'agenda.spec.ts']
+              ? [
+                  'normal.spec.ts',
+                  'normal-pending.spec.ts',
+                  'agenda.spec.ts',
+                  'search.spec.ts',
+                ]
               : ['demo.spec.ts']),
             ...process.argv.slice(2),
           ],

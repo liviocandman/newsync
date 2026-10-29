@@ -18,7 +18,9 @@ export class TestBackend {
   private backend: ChildProcess | undefined;
   private jdbcUrl = '';
   private backendLog: ReturnType<typeof createWriteStream> | undefined;
-  constructor(private readonly mode: 'normal' | 'demo') {
+  private readonly mode: 'normal' | 'demo';
+  constructor(mode: 'normal' | 'demo') {
+    this.mode = mode;
     this.container = `news-b03-${mode}-${randomUUID()}`;
   }
   private docker(...args: string[]) {

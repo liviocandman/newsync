@@ -40,7 +40,7 @@ class DemoConfigurationIT {
     url = "jdbc:postgresql://" + db.getHost() + ":" + db.getFirstMappedPort() + "/" + DATABASE;
     var flyway = Flyway.configure().dataSource(url, db.getUsername(), db.getPassword()).load();
     flyway.migrate();
-    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("002");
+    assertThat(flyway.info().current().getVersion().toString()).isEqualTo("003");
   }
 
   @AfterAll

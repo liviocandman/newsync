@@ -79,6 +79,17 @@ class DemoHttpIT {
   }
 
   @Test
+  void demoSearchesOnlyItsPersistedFixtureWithoutCsrf() throws Exception {
+    try (var client = client()) {
+      var response = get(client, "/api/v1/search?q=horta");
+      assertThat(response.statusCode()).isEqualTo(200);
+      assertThat(node(response).get("items").get(0).get("id").asString()).isEqualTo(articleId());
+      assertThat(node(response).get("hasMore").asBoolean()).isFalse();
+      assertThat(get(client, "/api/v1/search?q=Uber").body()).contains("\"items\":[]");
+    }
+  }
+
+  @Test
   void hostileHtmlIsCommittedSanitizedAndReturnedThroughHttp() throws Exception {
     assertThat(
             org.springframework.transaction.support.TransactionSynchronizationManager
