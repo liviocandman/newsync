@@ -1,6 +1,6 @@
 # Caderno — agregador de feeds
 
-Leitor pessoal local de RSS/Atom, sem login: cadastre uma fonte, peça a importação e leia ou abra o original. IDs e marcações de lido/salvo persistem no PostgreSQL. B-03 passou o gate local completo; [resultados e limites](docs/evidencias/B-03.md).
+Leitor pessoal local de RSS/Atom, sem login: cadastre uma fonte e leia ou abra o original. Fontes ativas são atualizadas automaticamente com a coleta habilitada. IDs e marcações de lido/salvo persistem no PostgreSQL. B-03 passou o gate local completo; [resultados e limites](docs/evidencias/B-03.md).
 
 ## Iniciar o leitor pessoal
 
@@ -28,11 +28,11 @@ npm ci
 npm run dev
 ```
 
-Abra [http://127.0.0.1:5173](http://127.0.0.1:5173), entre em **Gerenciar fontes**, cadastre a URL RSS/Atom e use **Importar agora**. Cadastro sozinho não coleta. O pedido recebe confirmação antes do download; acompanhe o resultado na fonte. É possível renomear, pausar, reativar e arquivar, preservando o acervo. URLs são imutáveis; duplicadas, inclusive arquivadas, oferecem reativação da fonte existente. A lista aceita filtros de fonte/lido/salvo e navegação por páginas.
+Abra [http://127.0.0.1:5173](http://127.0.0.1:5173), entre em **Gerenciar fontes**, cadastre a URL RSS/Atom. A fonte nasce ativa e pode coletar no próximo ciclo, sem aba aberta. **Importar agora** pede prioridade entre tentativas; o pedido recebe confirmação antes do download e respeita cooldown/Retry-After. Acompanhe resultado, falhas e próxima elegibilidade na fonte; o horário não prevê conclusão. É possível renomear, pausar, reativar e arquivar, preservando o acervo. URLs são imutáveis; duplicadas, inclusive arquivadas, oferecem reativação da fonte existente. A lista aceita filtros de fonte/lido/salvo e navegação por páginas.
 
 A origem do navegador precisa corresponder exatamente a `APP_BASE_URL`. Backend e frontend ficam em loopback. Abrir um artigo não marca lido; o conteúdo pode ser só resumo ou título/link. Nenhum recurso remoto é carregado para completar o texto. O transporte aceita feeds públicos HTTP/HTTPS e recusa destinos internos; uma URL cadastrada ainda pode falhar na primeira importação.
 
-O banco pessoal `news_personal` usa porta **5434** e volume exclusivo no projeto Compose `news-personal-local`. Para pará-lo preservando o volume, use `docker compose --env-file .env.local -f compose.local.yaml down`; para retomar, repita o `up`. O perfil normal não importa fixture nem refaz a coleta no restart. Um pedido manual ainda não confirmado é retomado, respeitando Retry-After e o cooldown persistido.
+O banco pessoal `news_personal` usa porta **5434** e volume exclusivo no projeto Compose `news-personal-local`. Para pará-lo preservando o volume, use `docker compose --env-file .env.local -f compose.local.yaml down`; para retomar, repita o `up`. O perfil normal não importa fixture. Ao iniciar ou reativar, fontes ativas vencidas e pedidos manuais elegíveis podem coletar. A agenda e Retry-After persistem; o restart não reproduz ticks perdidos. Para inspecionar uma instalação B-03 antes de permitir rede, acrescente `--app.collection.enabled=false` ao comando Java. A interface indica a coleta desabilitada; pedidos manuais podem ficar pendentes até habilitá-la.
 
 ## Iniciar a demonstração
 
@@ -78,7 +78,7 @@ Na primeira preparação do sistema, instale as bibliotecas Chromium com `cd fro
 
 ## Limites
 
-B-03 acrescenta cadastro e importação manual de URLs reais, identidade GUID/URL/fingerprint, paginação/filtros e leitura local. O [aceite integrado local](docs/evidencias/B-03.md) passou com dois builds, PostgreSQL, scanners e três percursos de navegador. Agenda automática e diagnóstico operacional completo vêm em B-04; busca em B-05; backup/restauração em B-06; distribuição de produção fica para entrega posterior. B-06 continua necessária antes de guardar um acervo importante.
+B-03 acrescenta cadastro e importação manual de URLs reais, identidade GUID/URL/fingerprint, paginação/filtros e leitura local. O [aceite integrado local](docs/evidencias/B-03.md) passou com dois builds, PostgreSQL, scanners e três percursos de navegador. B-04 acrescenta agenda automática, backoff e diagnóstico operacional; busca em B-05; backup/restauração em B-06; distribuição de produção fica para entrega posterior. B-06 continua necessária antes de guardar um acervo importante.
 
 A direção de produto revisada em 29/10/2026 é um leitor pessoal local, sem conta, senha ou login, com um único acervo compartilhado pelos clientes da instalação. Loopback é o padrão validado pela configuração de ambos os perfis. Acesso remoto por túnel ou rede de acesso restrito é uma opção de implantação ainda não implementada nem testada; a aplicação dependerá desse perímetro para limitar quem acessa o acervo. Expor a API pessoal publicamente exige controle de acesso antes da exposição. Origin, CSRF e proteção do conteúdo continuam necessários e não autenticam quem alcança a API.
 
@@ -88,8 +88,8 @@ O perfil Maven `demo` empacota uma fixture fixa; o perfil Spring `demo` habilita
 
 A [investigação B-01](docs/evidencias/B-01.md) foi concluída em 28/10/2026 com uma amostra de oito fontes reais, três exemplos de recuperação e foco em acompanhar chamadas/abrir o original. Seus recortes sintéticos orientam os testes de ingestão B-03; a amostra não é cadastrada automaticamente.
 
-[F-02 — estabilização da fundação](docs/specs/F-02-estabilizacao-da-fundacao.md) implementa o gate e as regressões de segurança; seu aceite executado está em [F-02](docs/evidencias/F-02.md). A [autenticação própria de B-02](docs/specs/B-02-conta-sessao-e-administracao-offline.md) foi adiada e saiu do caminho obrigatório. A [spec B-03 — leitor local e ingestão real](docs/specs/B-03-leitor-local-e-ingestao-real.md), detalhada em 29/10/2026, orienta esta implementação e seu gate de aceite. A conclusão exige as provas normal/demo, recuperação CSRF, transporte, migração e identidade previstas na spec; código implementado não substitui evidência executada.
+[F-02 — estabilização da fundação](docs/specs/F-02-estabilizacao-da-fundacao.md) implementa o gate e as regressões de segurança; seu aceite executado está em [F-02](docs/evidencias/F-02.md). A [autenticação própria de B-02](docs/specs/B-02-conta-sessao-e-administracao-offline.md) foi adiada e saiu do caminho obrigatório. A [B-03 — leitor local e ingestão real](docs/specs/B-03-leitor-local-e-ingestao-real.md) está implementada e verificada localmente. A [análise posterior](docs/revisoes/B-03-preparacao-das-proximas-entregas.md) conferiu o manifesto do código e os relatórios arquivados, sem reexecutar o gate.
 
-O [backlog](docs/08-backlog-e-entregas.md) organiza B-03 → B-04 (agenda e diagnóstico) → B-05 (busca) → B-06 (backup/restauração). B-06 deve estar verificada antes de guardar um acervo importante. Os comandos acima separam o uso pessoal da demonstração; resultados e limites de aceite pertencem às evidências executadas.
+A [B-04 — agenda e diagnóstico](docs/specs/B-04-agenda-e-diagnostico.md) está implementada; validação e limites ficam em [suas evidências](docs/evidencias/B-04.md). [B-05 — busca](docs/specs/B-05-busca-no-acervo.md) e [B-06 — backup/restauração](docs/specs/B-06-backup-e-restauracao.md) continuam pendentes. B-06 pode ser antecipada e deve estar verificada antes de guardar um acervo importante. O [backlog](docs/08-backlog-e-entregas.md) acompanha a sequência; os comandos acima continuam descrevendo somente as funcionalidades já entregues.
 
 `docs/` é ignorado pelo `.gitignore`: esta documentação fica local e exige inclusão explícita caso deva ser versionada. A política de exclusão foi preservada.

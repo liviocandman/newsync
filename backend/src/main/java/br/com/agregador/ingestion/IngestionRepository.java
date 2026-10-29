@@ -24,7 +24,6 @@ public class IngestionRepository {
 
   public boolean lockCurrent(
       UUID sourceId, long version, OffsetDateTime requestedAt, boolean manual) {
-    if (manual && requestedAt == null) return false;
     var row =
         jdbc.sql(
                 "SELECT lifecycle_version,status,manual_requested_at FROM sources WHERE id=:id FOR UPDATE")

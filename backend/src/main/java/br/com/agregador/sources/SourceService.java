@@ -72,7 +72,7 @@ public class SourceService {
         body.containsKey("title") ? title(body.get("title")) : java.net.URI.create(url).getHost();
     limits();
     try {
-      return sources.find(sources.create(url, name, now())).view();
+      return sources.view(sources.find(sources.create(url, name, now())));
     } catch (DuplicateKeyException duplicate) {
       throw new Rejected(
           409,
@@ -97,7 +97,7 @@ public class SourceService {
     if (old.status().equals("archived") && !state.equals("active"))
       throw new Rejected(409, "SOURCE_ARCHIVED", "Reative a fonte para alterá-la.", 0);
     sources.edit(id, name, state, !state.equals(old.status()), now());
-    return sources.find(id).view();
+    return sources.view(sources.find(id));
   }
 
   @Transactional(timeout = 10)
@@ -116,8 +116,8 @@ public class SourceService {
     var current = now();
     if (!row.status().equals("active"))
       throw new Rejected(409, "SOURCE_INACTIVE", "A fonte precisa estar ativa.", 0);
-    if (row.manualRequestedAt() != null)
-      return new Refresh(activity.matches(id, row.lifecycleVersion()) ? "collecting" : "scheduled");
+    if (activity.matches(id, row.lifecycleVersion())) return new Refresh("collecting");
+    if (row.manualRequestedAt() != null) return new Refresh("scheduled");
     OffsetDateTime allowed =
         row.lastManualRefreshAt() == null ? current : row.lastManualRefreshAt().plusMinutes(1);
     if (row.retryAfterAt() != null && row.retryAfterAt().isAfter(allowed))
@@ -136,7 +136,9 @@ public class SourceService {
   public boolean begin(SourceRepository.Row captured) {
     limits();
     var row = sources.lock(captured.id());
-    if (!current(row, captured)) return false;
+    if (!current(row, captured)
+        || row.nextPollAt().isAfter(now())
+        || row.retryAfterAt() != null && row.retryAfterAt().isAfter(now())) return false;
     sources.attempted(row.id(), now());
     return true;
   }

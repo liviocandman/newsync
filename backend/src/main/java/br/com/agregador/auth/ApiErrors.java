@@ -4,7 +4,6 @@ import br.com.agregador.auth.HttpParameters.UnsupportedParameters;
 import jakarta.servlet.http.*;
 import java.io.IOException;
 import java.util.NoSuchElementException;
-import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -61,7 +60,7 @@ public class ApiErrors {
       status = 404;
       code = "NOT_FOUND";
       message = "Recurso não encontrado.";
-    } else if (error instanceof DataAccessException) {
+    } else if (DatabaseFailures.temporary(error)) {
       status = 503;
       code = "DATABASE_UNAVAILABLE";
       message = "Banco temporariamente indisponível.";

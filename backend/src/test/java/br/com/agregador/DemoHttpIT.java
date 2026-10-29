@@ -282,6 +282,9 @@ class DemoHttpIT {
     try (var client = client()) {
       var csrf = node(get(client, "/api/v1/auth/csrf"));
       String source = jdbc.sql("SELECT id::text FROM sources").query(String.class).single();
+      var diagnostic = node(get(client, "/api/v1/sources/" + source));
+      assertThat(diagnostic.get("collectionEnabled").asBoolean()).isFalse();
+      assertThat(diagnostic.get("collecting").asBoolean()).isFalse();
       var before = jdbc.sql("SELECT * FROM sources").query().listOfRows();
       for (String[] operation :
           List.of(

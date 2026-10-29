@@ -10,6 +10,7 @@
       <Class name="br.com.agregador.ingestion.DemoInitializer"/>
       <Class name="br.com.agregador.ingestion.ManualFeedDispatcher"/>
       <Class name="br.com.agregador.sources.SourceController"/>
+      <Class name="br.com.agregador.sources.SourceRepository"/>
       <Class name="br.com.agregador.sources.SourceService"/>
     </Or>
     <Method name="&lt;init&gt;"/>

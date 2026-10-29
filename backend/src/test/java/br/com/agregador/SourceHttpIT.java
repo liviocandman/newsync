@@ -24,6 +24,8 @@ import tools.jackson.databind.*;
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {"app.collection.initial-delay-ms=3600000", "app.collection.delay-ms=3600000"})
+@org.junit.jupiter.api.extension.ExtendWith(
+    org.springframework.boot.test.system.OutputCaptureExtension.class)
 class SourceHttpIT {
   @DynamicPropertySource
   static void database(DynamicPropertyRegistry p) {
@@ -114,7 +116,6 @@ class SourceHttpIT {
   @Test
   void registersPendingWithoutDownloadAndValidatesLifecycleAndDuplicates() throws Exception {
     String id = create();
-    dispatcher.tick();
     verifyNoInteractions(transport);
     assertThat(
             write(
@@ -213,13 +214,11 @@ class SourceHttpIT {
 
   @org.junit.jupiter.params.ParameterizedTest
   @org.junit.jupiter.params.provider.CsvSource({
-    "paused,false",
-    "paused,true",
-    "archived,false",
-    "archived,true"
+    "paused,false,false", "paused,true,false", "archived,false,false", "archived,true,false",
+    "paused,false,true", "paused,true,true", "archived,false,true", "archived,true,true"
   })
-  void staleDownloadCannotChangeReactivatedSourceOrConsumeNewRequest(String state, boolean failed)
-      throws Exception {
+  void staleDownloadCannotChangeReactivatedSourceOrConsumeNewRequest(
+      String state, boolean failed, boolean automatic) throws Exception {
     String id = create();
     var started = new CountDownLatch(1);
     var release = new CountDownLatch(1);
@@ -233,7 +232,7 @@ class SourceHttpIT {
                     "HTTP_503", "Falha antiga", time.plusSeconds(3600));
               return new PublicFeedClient.Response(200, xml("Resposta antiga"), "old", null, null);
             });
-    write("POST", "/sources/" + id + "/refresh", null);
+    if (!automatic) write("POST", "/sources/" + id + "/refresh", null);
     try (var executor = Executors.newSingleThreadExecutor()) {
       var future = executor.submit(dispatcher::tick);
       assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
@@ -397,7 +396,8 @@ class SourceHttpIT {
   }
 
   @Test
-  void dispatcherRetainsRequestAfterCommitFailureAndWaitsBeforeRetry() throws Exception {
+  void dispatcherRetainsRequestAfterCommitFailureAndWaitsBeforeRetry(
+      org.springframework.boot.test.system.CapturedOutput output) throws Exception {
     String id = create();
     when(transport.fetch(anyString(), isNull(), isNull()))
         .thenReturn(new PublicFeedClient.Response(200, xml("Novo"), "v1", null, null));
@@ -414,12 +414,17 @@ class SourceHttpIT {
       assertThat(jdbc.sql("SELECT count(*) FROM articles").query(Long.class).single()).isZero();
       dispatcher.tick();
       verify(transport, times(1)).fetch(anyString(), isNull(), isNull());
+      when(clock.instant()).thenReturn(time.plusSeconds(5));
+      dispatcher.tick();
+      verify(transport, times(2)).fetch(anyString(), isNull(), isNull());
+      assertThat(output.getOut().split("COLLECTION_UNCONFIRMED", -1)).hasSize(2);
     } finally {
       jdbc.sql("DROP TRIGGER b03_fail_result ON sources").update();
       jdbc.sql("DROP FUNCTION b03_fail_result()").update();
     }
-    when(clock.instant()).thenReturn(time.plusSeconds(5));
+    when(clock.instant()).thenReturn(time.plusSeconds(10));
     dispatcher.tick();
+    assertThat(output.getOut()).contains("COLLECTION_RECOVERED");
     assertThat(sources.find(UUID.fromString(id)).manualRequestedAt()).isNull();
     assertThat(jdbc.sql("SELECT count(*) FROM articles").query(Long.class).single()).isEqualTo(1);
   }
@@ -492,5 +497,310 @@ class SourceHttpIT {
       assertThat(response.statusCode()).as(path + " " + response.body()).isEqualTo(400);
       assertThat(body(response).get("code").asString()).isEqualTo("UNSUPPORTED_PARAMETERS");
     }
+  }
+
+  @Test
+  void automaticSelectionSkipsIneligibleSourcesAndProcessesOnePerTick() throws Exception {
+    String id = create();
+    verifyNoInteractions(transport);
+    UUID second =
+        sources.create(
+            "https://second.example/feed", "Segunda", time.plusSeconds(1).atOffset(ZoneOffset.UTC));
+    UUID future =
+        sources.create(
+            "https://future.example/feed",
+            "Futura",
+            time.plusSeconds(3600).atOffset(ZoneOffset.UTC));
+    for (String state : List.of("paused", "archived")) {
+      UUID other =
+          sources.create(
+              "https://" + state + ".example/feed",
+              state,
+              time.minusSeconds(60).atOffset(ZoneOffset.UTC));
+      jdbc.sql("UPDATE sources SET status=:state WHERE id=:id")
+          .param("state", state)
+          .param("id", other)
+          .update();
+    }
+    UUID blocked =
+        sources.create(
+            "https://blocked.example/feed",
+            "Bloqueada",
+            time.minusSeconds(120).atOffset(ZoneOffset.UTC));
+    jdbc.sql("UPDATE sources SET retry_after_at=:at,manual_requested_at=next_poll_at WHERE id=:id")
+        .param("at", time.plusSeconds(3600).atOffset(ZoneOffset.UTC))
+        .param("id", blocked)
+        .update();
+    when(clock.instant()).thenReturn(time.plusSeconds(2));
+    when(transport.fetch(anyString(), isNull(), isNull()))
+        .thenReturn(new PublicFeedClient.Response(200, xml("Automática"), "v1", null, null));
+    dispatcher.tick();
+    verify(transport, times(1)).fetch(anyString(), isNull(), isNull());
+    assertThat(sources.find(UUID.fromString(id)).lastResult()).isEqualTo("success");
+    assertThat(sources.find(second).lastResult()).isEqualTo("never");
+    dispatcher.tick();
+    verify(transport, times(2)).fetch(anyString(), isNull(), isNull());
+    assertThat(sources.find(second).lastResult()).isEqualTo("success");
+    dispatcher.tick();
+    verifyNoMoreInteractions(transport);
+    assertThat(sources.find(future).lastAttemptAt()).isNull();
+    assertThat(sources.find(blocked).lastAttemptAt()).isNull();
+    assertThat(
+            jdbc.sql(
+                    "SELECT count(*) FROM sources WHERE status<>'active' AND last_attempt_at IS NOT NULL")
+                .query(Long.class)
+                .single())
+        .isZero();
+    write("PATCH", "/sources/" + id, "{\"state\":\"paused\"}");
+    write("PATCH", "/sources/" + id, "{\"state\":\"active\"}");
+    when(transport.fetch(anyString(), eq("v1"), isNull()))
+        .thenReturn(new PublicFeedClient.Response(304, new byte[0], null, null, null));
+    dispatcher.tick();
+    assertThat(sources.find(UUID.fromString(id)).lastResult()).isEqualTo("not_modified");
+    assertThat(
+            body(request("GET", "/sources/" + id, null, null, false))
+                .get("collectionEnabled")
+                .asBoolean())
+        .isTrue();
+  }
+
+  @Test
+  void automaticCaptureRevalidatesManualMarkAndDisabledDispatcherDoesNothing() throws Exception {
+    UUID id = UUID.fromString(create());
+    var captured = sources.find(id);
+    service.refresh(id);
+    assertThat(service.begin(captured)).isFalse();
+    var disabled =
+        new ManualFeedDispatcher(
+            sources, service, activity, transport, parser, writer, clock, false);
+    disabled.ready();
+    disabled.tick();
+    verifyNoInteractions(transport);
+    assertThat(sources.find(id).lastAttemptAt()).isNull();
+  }
+
+  @Test
+  void manualDuringAutomaticCoalescesAndHasPriorityBetweenSequentialAttempts() throws Exception {
+    UUID a = UUID.fromString(create());
+    UUID c =
+        sources.create("https://c.example/feed", "C", time.plusSeconds(1).atOffset(ZoneOffset.UTC));
+    UUID b =
+        sources.create(
+            "https://b.example/feed", "B", time.plusSeconds(3600).atOffset(ZoneOffset.UTC));
+    var started = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    when(transport.fetch(eq(sources.find(a).feedUrl()), isNull(), isNull()))
+        .thenAnswer(
+            call -> {
+              assertThat(
+                      org.springframework.transaction.support.TransactionSynchronizationManager
+                          .isActualTransactionActive())
+                  .isFalse();
+              started.countDown();
+              if (!release.await(10, TimeUnit.SECONDS)) throw new TimeoutException();
+              return new PublicFeedClient.Response(200, xml("A"), null, null, null);
+            });
+    when(transport.fetch(eq("https://b.example/feed"), isNull(), isNull()))
+        .thenReturn(new PublicFeedClient.Response(200, xml("B"), null, null, null));
+    when(transport.fetch(eq("https://c.example/feed"), isNull(), isNull()))
+        .thenReturn(new PublicFeedClient.Response(200, xml("C"), null, null, null));
+    try (var executor = Executors.newSingleThreadExecutor()) {
+      var work = executor.submit(dispatcher::tick);
+      try {
+        assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(service.refresh(a).status()).isEqualTo("collecting");
+        assertThat(sources.find(a).manualRequestedAt()).isNull();
+        assertThat(sources.view(sources.find(a)).collecting()).isTrue();
+        when(clock.instant()).thenReturn(time.plusSeconds(2));
+        assertThat(service.refresh(b).status()).isEqualTo("scheduled");
+        dispatcher.tick();
+        verify(transport, times(1)).fetch(anyString(), isNull(), isNull());
+      } finally {
+        release.countDown();
+      }
+      work.get(15, TimeUnit.SECONDS);
+    }
+    assertThat(sources.find(a).lastResult()).isEqualTo("success");
+    dispatcher.tick();
+    assertThat(sources.find(b).lastResult()).isEqualTo("success");
+    assertThat(sources.find(c).lastResult()).isEqualTo("never");
+    dispatcher.tick();
+    assertThat(sources.find(c).lastResult()).isEqualTo("success");
+    assertThat(sources.view(sources.find(a)).collecting()).isFalse();
+  }
+
+  @Test
+  void persistedBackoffRetryAfterAndRestartRespectCompletionAndPreservePersonalStates()
+      throws Exception {
+    UUID id = UUID.fromString(create());
+    when(transport.fetch(anyString(), isNull(), isNull()))
+        .thenReturn(new PublicFeedClient.Response(200, xml("Inicial"), null, null, null));
+    dispatcher.tick();
+    jdbc.sql("UPDATE articles SET read_at=:at,saved_at=:at")
+        .param("at", time.atOffset(ZoneOffset.UTC))
+        .update();
+    var identity = jdbc.sql("SELECT id,read_at,saved_at FROM articles").query().listOfRows();
+    var lastSuccess = sources.find(id).lastSuccessAt();
+    when(clock.instant()).thenReturn(time.plusSeconds(1801));
+    when(transport.fetch(anyString(), isNull(), isNull()))
+        .thenThrow(new FeedTransportException("HTTP_503", "Indisponível", time.plusSeconds(86400)));
+    dispatcher.tick();
+    var failed = sources.find(id);
+    assertThat(failed.consecutiveFailures()).isEqualTo(1);
+    assertThat(failed.nextPollAt().toInstant()).isEqualTo(time.plusSeconds(86400));
+    assertThat(failed.lastSuccessAt()).isEqualTo(lastSuccess);
+    var fresh =
+        new ManualFeedDispatcher(
+            sources, service, activity, transport, parser, writer, clock, true);
+    fresh.ready();
+    fresh.tick();
+    verify(transport, times(2)).fetch(anyString(), isNull(), isNull());
+    when(clock.instant()).thenReturn(time.plusSeconds(86401));
+    doReturn(new PublicFeedClient.Response(200, xml("Retomada"), null, null, null))
+        .when(transport)
+        .fetch(anyString(), isNull(), isNull());
+    fresh.tick();
+    assertThat(sources.find(id).consecutiveFailures()).isZero();
+    fresh.tick();
+    verify(transport, times(3)).fetch(anyString(), isNull(), isNull());
+    assertThat(jdbc.sql("SELECT id,read_at,saved_at FROM articles").query().listOfRows())
+        .isEqualTo(identity);
+  }
+
+  @Test
+  void failedSourceBacksOffWhileAnotherProgressesAndManualCanAdvanceLocalDelay() throws Exception {
+    UUID a = UUID.fromString(create());
+    UUID b = sources.create("https://b.example/feed", "B", time.atOffset(ZoneOffset.UTC));
+    service.refresh(a);
+    when(transport.fetch(eq(sources.find(a).feedUrl()), isNull(), isNull()))
+        .thenThrow(new FeedTransportException("HTTP_503", "Indisponível", null));
+    when(transport.fetch(eq("https://b.example/feed"), isNull(), isNull()))
+        .thenReturn(new PublicFeedClient.Response(200, xml("B"), null, null, null));
+    dispatcher.tick();
+    var row = sources.find(a);
+    assertThat(row.consecutiveFailures()).isEqualTo(1);
+    assertThat(row.nextPollAt().toInstant())
+        .isBetween(time.plusSeconds(300), time.plusSeconds(330));
+    dispatcher.tick();
+    assertThat(sources.find(b).lastResult()).isEqualTo("success");
+    when(clock.instant()).thenReturn(time.plusSeconds(61));
+    service.refresh(a);
+    dispatcher.tick();
+    assertThat(sources.find(a).consecutiveFailures()).isEqualTo(2);
+    assertThat(sources.find(a).nextPollAt().toInstant())
+        .isBetween(time.plusSeconds(961), time.plusSeconds(1051));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {"success", "not_modified", "partial"})
+  void confirmedResultsResetFailuresUsingCompletionTime(String result) throws Exception {
+    UUID id = UUID.fromString(create());
+    jdbc.sql(
+            "UPDATE sources SET consecutive_failures=6,etag='previous',last_success_at=:at WHERE id=:id")
+        .param("at", time.minusSeconds(100).atOffset(ZoneOffset.UTC))
+        .param("id", id)
+        .update();
+    when(transport.fetch(anyString(), eq("previous"), isNull()))
+        .thenAnswer(
+            call -> {
+              when(clock.instant()).thenReturn(time.plusSeconds(12));
+              if (result.equals("not_modified"))
+                return new PublicFeedClient.Response(304, new byte[0], null, null, null);
+              String feed = new String(xml("Resultado"), StandardCharsets.UTF_8);
+              if (result.equals("partial"))
+                feed = feed.replace("</channel>", "<item><guid>invalid</guid></item></channel>");
+              return new PublicFeedClient.Response(
+                  200, feed.getBytes(StandardCharsets.UTF_8), "new", null, null);
+            });
+    dispatcher.tick();
+    var row = sources.find(id);
+    assertThat(row.lastResult()).isEqualTo(result);
+    assertThat(row.consecutiveFailures()).isZero();
+    assertThat(row.nextPollAt().toInstant()).isEqualTo(time.plusSeconds(1812));
+    assertThat(row.lastSuccessAt().toInstant())
+        .isEqualTo(result.equals("partial") ? time.minusSeconds(100) : time.plusSeconds(12));
+    assertThat(row.etag()).isEqualTo(result.equals("success") ? "new" : "previous");
+  }
+
+  @Test
+  void automaticRestartBeforeConfirmationRepeatsIdempotentlyAndHonorsCommittedSchedule()
+      throws Exception {
+    UUID id = UUID.fromString(create());
+    when(transport.fetch(anyString(), isNull(), isNull()))
+        .thenReturn(new PublicFeedClient.Response(200, xml("Mesmo artigo"), null, null, null));
+    dispatcher.tick();
+    jdbc.sql("UPDATE articles SET read_at=:at,saved_at=:at")
+        .param("at", time.atOffset(ZoneOffset.UTC))
+        .update();
+    var identity = jdbc.sql("SELECT id,read_at,saved_at FROM articles").query().listOfRows();
+    when(clock.instant()).thenReturn(time.plusSeconds(1801));
+    var captured =
+        sources.nextEligible(time.plusSeconds(1801).atOffset(ZoneOffset.UTC)).orElseThrow();
+    assertThat(service.begin(captured)).isTrue();
+    // Simulate process loss after begin and before confirmation; no durable collecting state
+    // exists.
+    var freshActivity = new CollectionActivity();
+    var fresh =
+        new ManualFeedDispatcher(
+            sources, service, freshActivity, transport, parser, writer, clock, true);
+    fresh.ready();
+    fresh.tick();
+    assertThat(jdbc.sql("SELECT id,read_at,saved_at FROM articles").query().listOfRows())
+        .isEqualTo(identity);
+    assertThat(sources.find(id).nextPollAt().toInstant()).isEqualTo(time.plusSeconds(3601));
+    fresh.tick();
+    verify(transport, times(2)).fetch(anyString(), isNull(), isNull());
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1, 2, 3, 4, 5, 6, 7})
+  void failureStepsPersistWithBoundedJitter(int previousFailures) throws Exception {
+    UUID id = UUID.fromString(create());
+    jdbc.sql("UPDATE sources SET consecutive_failures=:failures WHERE id=:id")
+        .param("failures", previousFailures)
+        .param("id", id)
+        .update();
+    when(transport.fetch(anyString(), isNull(), isNull()))
+        .thenThrow(new FeedTransportException("HTTP_503", "Indisponível", null));
+    dispatcher.tick();
+    long[] seconds = {300, 900, 1800, 3600, 7200, 14400, 21600, 21600};
+    var row = sources.find(id);
+    assertThat(row.consecutiveFailures()).isEqualTo(previousFailures + 1);
+    System.out.println(
+        "BACKOFF_SQL "
+            + jdbc.sql(
+                    "SELECT consecutive_failures,next_poll_at,last_attempt_at FROM sources WHERE id=:id")
+                .param("id", id)
+                .query()
+                .listOfRows());
+    assertThat(row.nextPollAt().toInstant())
+        .isBetween(
+            time.plusSeconds(seconds[previousFailures]),
+            time.plusSeconds(Math.min(21600, seconds[previousFailures] * 11 / 10)));
+  }
+
+  @Test
+  void eligibleManualsUseFifoAndIdBeforeMostOverdueAutomatic() throws Exception {
+    UUID a = UUID.fromString(create());
+    UUID b =
+        sources.create(
+            "https://b.example/feed", "B", time.minusSeconds(1).atOffset(ZoneOffset.UTC));
+    UUID c =
+        sources.create(
+            "https://c.example/feed", "C", time.minusSeconds(3600).atOffset(ZoneOffset.UTC));
+    sources.request(a, time.minusSeconds(10).atOffset(ZoneOffset.UTC));
+    sources.request(b, time.minusSeconds(20).atOffset(ZoneOffset.UTC));
+    var now = time.atOffset(ZoneOffset.UTC);
+    assertThat(sources.nextEligible(now).orElseThrow().id()).isEqualTo(b);
+    sources.request(a, time.minusSeconds(20).atOffset(ZoneOffset.UTC));
+    UUID first = a.toString().compareTo(b.toString()) < 0 ? a : b;
+    assertThat(sources.nextEligible(now).orElseThrow().id()).isEqualTo(first);
+    when(transport.fetch(anyString(), isNull(), isNull()))
+        .thenReturn(new PublicFeedClient.Response(200, xml("FIFO"), null, null, null));
+    dispatcher.tick();
+    dispatcher.tick();
+    assertThat(sources.find(c).lastAttemptAt()).isNull();
+    dispatcher.tick();
+    assertThat(sources.find(c).lastResult()).isEqualTo("success");
   }
 }

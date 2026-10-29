@@ -31,6 +31,10 @@ export type Source = {
   lastAttemptAt: string | null;
   manualRequestedAt: string | null;
   retryAfterAt: string | null;
+  nextPollAt: string;
+  consecutiveFailures: number;
+  collecting: boolean;
+  collectionEnabled: boolean;
   diagnostic: { code: string; message: string; ignoredItems: number } | null;
 };
 export type Filters = {

@@ -3,7 +3,7 @@ import { TestBackend } from './support/backend.ts';
 const backend = new TestBackend('normal');
 const articleId = '10000000-0000-0000-0000-000000000001';
 test.beforeAll(async () => {
-  await backend.create();
+  await backend.create({ collectionEnabled: false });
 });
 test.afterAll(async () => {
   await backend.dispose();
@@ -65,7 +65,7 @@ test('normal vazio → fonte pendente → leitura → restart recupera CSRF uma 
   );
   const articleUrl = page.url();
   await backend.stop();
-  await backend.start();
+  await backend.start({ collectionEnabled: false });
   expect(
     backend.sql(
       `SELECT id || '|' || read_at || '|' || saved_at FROM articles WHERE id='${articleId}'`,
@@ -139,6 +139,9 @@ test('normal vazio → fonte pendente → leitura → restart recupera CSRF uma 
     path: testInfo.outputPath('leitor-normal.png'),
     fullPage: true,
   });
+  await backend.stop();
+  await backend.start({ collectionEnabled: true });
+  await page.reload();
   await page.getByRole('link', { name: 'Gerenciar fontes' }).click();
   await source.getByRole('button', { name: 'Importar agora' }).click();
   await expect(

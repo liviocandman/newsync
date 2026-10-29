@@ -29,6 +29,7 @@ function Failure({ error, retry }: { error: Error; retry: () => void }) {
   );
 }
 function sourceResult(source: Source) {
+  if (source.collecting) return 'Coletando; aguarde o resultado.';
   if (source.manualRequestedAt)
     return 'Importação solicitada; aguardando resultado.';
   return {
@@ -39,15 +40,28 @@ function sourceResult(source: Source) {
     failed: 'A importação falhou.',
   }[source.lastResult];
 }
-function sourcesQuery() {
-  return {
+function useSources() {
+  const [visible, setVisible] = useState(document.visibilityState !== 'hidden');
+  const client = useQueryClient();
+  useEffect(() => {
+    const visibility = () => {
+      const shown = document.visibilityState !== 'hidden';
+      setVisible(shown);
+      if (shown) void client.invalidateQueries({ queryKey: ['sources'] });
+    };
+    document.addEventListener('visibilitychange', visibility);
+    return () => document.removeEventListener('visibilitychange', visibility);
+  }, [client]);
+  return useQuery({
     queryKey: ['sources'],
     queryFn: api.sources,
-    refetchInterval: (query: { state: { data: Source[] | undefined } }) =>
-      query.state.data?.some((source) => source.manualRequestedAt)
-        ? 1500
-        : (false as const),
-  };
+    refetchOnWindowFocus: 'always',
+    refetchInterval: (query) =>
+      visible && query.state.data?.some((source) => source.collectionEnabled)
+        ? 5000
+        : false,
+    refetchIntervalInBackground: false,
+  });
 }
 export function App() {
   const [filters, setFilters] = useState<Filters>({});
@@ -57,21 +71,35 @@ export function App() {
     queryKey: ['articles', filters, cursor],
     queryFn: () => api.articles({ ...filters, cursor }),
   });
-  const sources = useQuery(sourcesQuery());
+  const sources = useSources();
   const client = useQueryClient();
-  const sourceResults = useRef(new Map<string, string>());
+  const sourceResults = useRef(new Map<string, string | null>());
+  const sourcesInitialized = useRef(false);
   useEffect(() => {
     let changed = false;
     for (const source of sources.data ?? []) {
-      const signature = `${source.lastResult}/${source.lastSuccessAt}/${source.lastAttemptAt}/${source.manualRequestedAt}`;
+      if (source.collecting || source.manualRequestedAt) {
+        if (!sourceResults.current.has(source.id))
+          sourceResults.current.set(source.id, null);
+        continue;
+      }
+      const signature = `${source.lastResult}/${source.lastSuccessAt}/${source.nextPollAt}`;
       if (
-        sourceResults.current.has(source.id) &&
-        sourceResults.current.get(source.id) !== signature
+        (sourceResults.current.has(source.id) &&
+          sourceResults.current.get(source.id) !== signature) ||
+        (!sourceResults.current.has(source.id) &&
+          sourcesInitialized.current &&
+          source.lastResult !== 'never')
       )
         changed = true;
       sourceResults.current.set(source.id, signature);
     }
-    if (changed) void client.invalidateQueries({ queryKey: ['articles'] });
+    if (sources.data) sourcesInitialized.current = true;
+    if (changed) {
+      void client.invalidateQueries({ queryKey: ['articles'] });
+      void client.invalidateQueries({ queryKey: ['article'] });
+      void client.invalidateQueries({ queryKey: ['search'] });
+    }
   }, [sources.data, client]);
   function filter(patch: Filters) {
     setFilters({ ...filters, ...patch });
@@ -250,7 +278,7 @@ export function App() {
           <p className={styles.footnote}>
             {demo
               ? 'Dados sintéticos. As marcações ficam neste banco local.'
-              : 'As marcações ficam nesta instalação. Novos artigos chegam quando você pede uma importação.'}
+              : 'As marcações ficam nesta instalação. Fontes ativas podem receber artigos automaticamente quando a coleta está habilitada.'}
           </p>
         </aside>
         <main className={styles.main}>
@@ -288,7 +316,7 @@ export function App() {
 }
 function SourcesScreen() {
   const client = useQueryClient();
-  const sources = useQuery(sourcesQuery());
+  const sources = useSources();
   const [feedUrl, setFeedUrl] = useState('');
   const [title, setTitle] = useState('');
   const creation = useMutation({
@@ -312,8 +340,10 @@ function SourcesScreen() {
       <span className={styles.eyebrow}>SEU ACERVO LOCAL</span>
       <h2>Fontes de leitura</h2>
       <p>
-        Cadastre o endereço RSS ou Atom. Depois, peça a importação quando quiser
-        receber artigos.
+        Cadastre o endereço RSS ou Atom. Com a coleta habilitada, fontes ativas
+        podem importar no próximo ciclo, inclusive após reativação. Importar
+        agora pede prioridade entre tentativas e respeita o tempo de espera da
+        fonte.
       </p>
       <form className={styles.sourceForm} onSubmit={submit}>
         <label>
@@ -342,7 +372,8 @@ function SourcesScreen() {
       </form>
       {creation.isSuccess && (
         <p role="status">
-          Fonte cadastrada. Peça a importação para receber artigos.
+          Fonte cadastrada. A coleta habilitada poderá importar automaticamente
+          no próximo ciclo.
         </p>
       )}
       {creation.isError && (
@@ -418,20 +449,73 @@ function SourceCard({ source }: { source: Source }) {
         </span>
       </div>
       <p className={styles.feedUrl}>{source.feedUrl}</p>
-      <p role={source.manualRequestedAt ? 'status' : undefined}>
+      <p
+        role={
+          source.manualRequestedAt || source.collecting ? 'status' : undefined
+        }
+      >
         {sourceResult(source)}
       </p>
-      {source.diagnostic && (
-        <p className={styles.error}>{source.diagnostic.message}</p>
+      {!source.collectionEnabled && (
+        <p>Coleta desabilitada nesta instalação.</p>
       )}
-      {source.lastSuccessAt && (
+      {source.state !== 'active' && (
+        <p>
+          Atualização suspensa enquanto a fonte estiver{' '}
+          {source.state === 'paused' ? 'pausada' : 'arquivada'}.
+        </p>
+      )}
+      {source.diagnostic && (
+        <p className={styles.error}>
+          {source.diagnostic.message} Itens ignorados:{' '}
+          {source.diagnostic.ignoredItems}.
+        </p>
+      )}
+      <p className={styles.sourceTimestamp}>
+        Falhas consecutivas: {source.consecutiveFailures}.
+      </p>
+      <p className={styles.sourceTimestamp}>
+        Último resultado:{' '}
+        {
+          {
+            never: 'Pendente',
+            success: 'Sucesso',
+            not_modified: 'Sem alterações',
+            partial: 'Parcial',
+            failed: 'Falha',
+          }[source.lastResult]
+        }
+        .
+      </p>
+      <p className={styles.sourceTimestamp}>
+        Última tentativa:{' '}
+        {source.lastAttemptAt
+          ? new Date(source.lastAttemptAt).toLocaleString('pt-BR')
+          : 'Nenhuma'}
+        .
+      </p>
+      <p className={styles.sourceTimestamp}>
+        Último sucesso:{' '}
+        {source.lastSuccessAt
+          ? new Date(source.lastSuccessAt).toLocaleString('pt-BR')
+          : 'Nenhum'}
+        .
+      </p>
+      {source.collectionEnabled && source.state === 'active' && (
         <p className={styles.sourceTimestamp}>
-          Último sucesso: {date(source.lastSuccessAt)}
+          Próxima elegibilidade:{' '}
+          {new Date(
+            Math.max(
+              new Date(source.nextPollAt).getTime(),
+              source.retryAfterAt ? new Date(source.retryAfterAt).getTime() : 0,
+            ),
+          ).toLocaleString('pt-BR')}
+          . Não é previsão de conclusão; outras fontes podem estar aguardando.
         </p>
       )}
       {source.retryAfterAt && (
-        <p className={styles.sourceTimestamp}>
-          Próxima solicitação permitida após{' '}
+        <p>
+          Espera solicitada pela fonte até{' '}
           {new Date(source.retryAfterAt).toLocaleString('pt-BR')}.
         </p>
       )}
@@ -468,12 +552,18 @@ function SourceCard({ source }: { source: Source }) {
         {source.state === 'active' && (
           <>
             <button
-              disabled={action.isPending || !!source.manualRequestedAt}
+              disabled={
+                action.isPending ||
+                !!source.manualRequestedAt ||
+                source.collecting
+              }
               onClick={() => action.mutate('refresh')}
             >
-              {source.manualRequestedAt
-                ? 'Importação solicitada'
-                : 'Importar agora'}
+              {source.collecting
+                ? 'Coletando…'
+                : source.manualRequestedAt
+                  ? 'Importação solicitada'
+                  : 'Importar agora'}
             </button>
             <button
               disabled={action.isPending}

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -43,6 +43,10 @@ const source: Source = {
   manualRequestedAt: null,
   retryAfterAt: null,
   diagnostic: null,
+  nextPollAt: '2026-10-29T12:00:00Z',
+  consecutiveFailures: 0,
+  collecting: false,
+  collectionEnabled: true,
 };
 function show(path = '/') {
   return render(
@@ -148,7 +152,7 @@ it('cadastro confirma a fonte pendente sem solicitar importação', async () => 
   );
   expect(
     await screen.findByText(
-      'Fonte cadastrada. Peça a importação para receber artigos.',
+      'Fonte cadastrada. A coleta habilitada poderá importar automaticamente no próximo ciclo.',
     ),
   ).toBeInTheDocument();
   expect(
@@ -195,4 +199,199 @@ it('filtro novo descarta cursor anterior e usa valores declarativos', async () =
     cursor: undefined,
   });
   expect(screen.getByText('Página 1', { exact: true })).toBeInTheDocument();
+});
+
+it('acompanha automática e invalida lista e detalhe uma vez por conclusão parcial', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(api.sources).mockResolvedValue([source]);
+    show('/articles/a');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(api.article).toHaveBeenCalledTimes(1);
+    const before = vi.mocked(api.articles).mock.calls.length;
+    vi.mocked(api.sources).mockResolvedValue([
+      { ...source, collecting: true, lastAttemptAt: '2026-10-29T12:00:00Z' },
+    ]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5100);
+    });
+    expect(api.articles).toHaveBeenCalledTimes(before);
+    vi.mocked(api.sources).mockResolvedValue([
+      {
+        ...source,
+        lastAttemptAt: '2026-10-29T12:00:00Z',
+        lastResult: 'partial',
+        diagnostic: {
+          code: 'PARTIAL_FEED',
+          message: 'Parcial',
+          ignoredItems: 1,
+        },
+      },
+    ]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5100);
+    });
+    expect(api.articles).toHaveBeenCalledTimes(before + 1);
+    expect(api.article).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10100);
+    });
+    expect(api.articles).toHaveBeenCalledTimes(before + 1);
+    expect(api.article).toHaveBeenCalledTimes(2);
+    // An unconfirmed attempt changes only lastAttemptAt; it must not look like a new result.
+    vi.mocked(api.sources).mockResolvedValue([
+      {
+        ...source,
+        lastResult: 'partial',
+        lastAttemptAt: '2026-10-29T12:01:00Z',
+        diagnostic: {
+          code: 'PARTIAL_FEED',
+          message: 'Parcial',
+          ignoredItems: 1,
+        },
+      },
+    ]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5100);
+    });
+    expect(api.article).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('suspende consultas na aba oculta e relê diagnóstico ao recuperar visibilidade', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(api.sources).mockResolvedValue([source]);
+    show('/sources');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    const before = vi.mocked(api.sources).mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+    expect(api.sources).toHaveBeenCalledTimes(before);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(vi.mocked(api.sources).mock.calls.length).toBeGreaterThan(before);
+  } finally {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    vi.useRealTimers();
+  }
+});
+
+it('coleta desabilitada explicita o estado e não mantém polling', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.mocked(api.sources).mockResolvedValue([
+      { ...source, collectionEnabled: false },
+    ]);
+    show('/sources');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(
+      screen.getByText('Coleta desabilitada nesta instalação.'),
+    ).toBeInTheDocument();
+    const before = vi.mocked(api.sources).mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+    expect(api.sources).toHaveBeenCalledTimes(before);
+    expect(
+      screen.queryByText(/Próxima elegibilidade:/),
+    ).not.toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('mostra atividade, aviso parcial e o maior horário de elegibilidade', async () => {
+  vi.mocked(api.sources).mockResolvedValue([
+    {
+      ...source,
+      collecting: true,
+      lastResult: 'partial',
+      consecutiveFailures: 2,
+      retryAfterAt: '2026-10-29T14:00:00Z',
+      diagnostic: {
+        code: 'PARTIAL_FEED',
+        message: 'Alguns itens foram ignorados.',
+        ignoredItems: 3,
+      },
+    },
+  ]);
+  show('/sources');
+  expect(
+    await screen.findByText('Coletando; aguarde o resultado.'),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/Itens ignorados: 3/)).toBeInTheDocument();
+  expect(screen.getByText('Falhas consecutivas: 2.')).toBeInTheDocument();
+  expect(screen.getByText(/Próxima elegibilidade:/)).toHaveTextContent(
+    new Date('2026-10-29T14:00:00Z').toLocaleString('pt-BR'),
+  );
+  expect(screen.getByRole('button', { name: 'Coletando…' })).toBeDisabled();
+});
+
+it('refresh recusado conserva diagnóstico e não confirma pedido', async () => {
+  vi.mocked(api.sources).mockResolvedValue([source]);
+  vi.mocked(api.refreshSource).mockRejectedValue(
+    new Error('Aguarde antes de solicitar nova importação.'),
+  );
+  show('/sources');
+  await userEvent.click(
+    await screen.findByRole('button', { name: 'Importar agora' }),
+  );
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Aguarde antes de solicitar',
+  );
+  expect(
+    screen.queryByText(
+      'Pedido de importação aceito. O resultado aparecerá nesta fonte.',
+    ),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByText('Pendente; nenhuma importação concluída.'),
+  ).toBeInTheDocument();
+});
+
+it('atualiza o leitor quando a primeira consulta da fonte nova já observa conclusão', async () => {
+  vi.mocked(api.createSource).mockImplementation(async () => {
+    vi.mocked(api.sources).mockResolvedValue([
+      { ...source, lastResult: 'success' },
+    ]);
+    return source;
+  });
+  show('/sources');
+  await screen.findByText('Nenhuma fonte cadastrada.');
+  const before = vi.mocked(api.articles).mock.calls.length;
+  await userEvent.type(
+    screen.getByLabelText('URL do feed'),
+    'https://example.org/rss',
+  );
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Cadastrar fonte' }),
+  );
+  await screen.findByText('Importação concluída.');
+  expect(api.articles).toHaveBeenCalledTimes(before + 1);
 });

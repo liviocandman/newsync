@@ -26,7 +26,7 @@ public class SourceController {
   public SourceRepository.Source detail(
       @PathVariable UUID id, @RequestParam Map<String, String> params) {
     HttpParameters.noParameters(params);
-    return sources.find(id).view();
+    return sources.view(sources.find(id));
   }
 
   @PostMapping

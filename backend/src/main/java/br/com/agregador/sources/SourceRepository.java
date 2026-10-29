@@ -1,8 +1,11 @@
 package br.com.agregador.sources;
 
+import br.com.agregador.ingestion.CollectionSchedule;
 import java.sql.Types;
 import java.time.OffsetDateTime;
 import java.util.*;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -10,8 +13,24 @@ import org.springframework.stereotype.Repository;
 public class SourceRepository {
   private final JdbcClient jdbc;
 
-  public SourceRepository(JdbcClient jdbc) {
+  private final CollectionSchedule schedule;
+  private final CollectionActivity activity;
+  private final boolean enabled;
+
+  public SourceRepository(
+      JdbcClient jdbc,
+      CollectionSchedule schedule,
+      CollectionActivity activity,
+      Environment environment,
+      @Value("${app.collection.enabled:true}") boolean enabled) {
     this.jdbc = jdbc;
+    this.schedule = schedule;
+    this.activity = activity;
+    this.enabled = enabled && !environment.matchesProfiles("demo");
+  }
+
+  public Source view(Row row) {
+    return row.view(activity.matches(row.id(), row.lifecycleVersion()), enabled);
   }
 
   public record Diagnostic(String code, String message, int ignoredItems) {}
@@ -26,7 +45,11 @@ public class SourceRepository {
       OffsetDateTime lastAttemptAt,
       OffsetDateTime manualRequestedAt,
       OffsetDateTime retryAfterAt,
-      Diagnostic diagnostic) {}
+      Diagnostic diagnostic,
+      OffsetDateTime nextPollAt,
+      int consecutiveFailures,
+      boolean collecting,
+      boolean collectionEnabled) {}
 
   public record Row(
       UUID id,
@@ -44,8 +67,10 @@ public class SourceRepository {
       String lastModified,
       String diagnosticCode,
       String diagnosticMessage,
-      int ignoredItems) {
-    public Source view() {
+      int ignoredItems,
+      OffsetDateTime nextPollAt,
+      int consecutiveFailures) {
+    public Source view(boolean collecting, boolean enabled) {
       return new Source(
           id,
           feedUrl,
@@ -58,12 +83,16 @@ public class SourceRepository {
           retryAfterAt,
           diagnosticCode == null
               ? null
-              : new Diagnostic(diagnosticCode, diagnosticMessage, ignoredItems));
+              : new Diagnostic(diagnosticCode, diagnosticMessage, ignoredItems),
+          nextPollAt,
+          consecutiveFailures,
+          collecting,
+          enabled);
     }
   }
 
   private static final String COLUMNS =
-      "id,feed_url,title,status,lifecycle_version,last_result,last_success_at,last_attempt_at,manual_requested_at,last_manual_refresh_at,retry_after_at,etag,last_modified,diagnostic_code,diagnostic_message,ignored_items";
+      "id,feed_url,title,status,lifecycle_version,last_result,last_success_at,last_attempt_at,manual_requested_at,last_manual_refresh_at,retry_after_at,etag,last_modified,diagnostic_code,diagnostic_message,ignored_items,next_poll_at,consecutive_failures";
 
   // Only the fixed demo/test infrastructure uses idempotent registration.
   public UUID register(String url, String title) {
@@ -107,7 +136,7 @@ public class SourceRepository {
         .query(Row.class)
         .list()
         .stream()
-        .map(Row::view)
+        .map(this::view)
         .toList();
   }
 
@@ -172,15 +201,15 @@ public class SourceRepository {
         .update();
   }
 
-  public Optional<Row> nextManual(OffsetDateTime now) {
+  public Optional<Row> nextEligible(OffsetDateTime now) {
     return jdbc.sql(
             "SELECT "
                 + COLUMNS
                 + " "
                 + """
-      FROM sources WHERE status='active' AND manual_requested_at IS NOT NULL
+      FROM sources WHERE status='active' AND next_poll_at<=:now
       AND (retry_after_at IS NULL OR retry_after_at<=:now)
-      ORDER BY manual_requested_at,id LIMIT 1
+      ORDER BY (manual_requested_at IS NULL),manual_requested_at,CASE WHEN manual_requested_at IS NULL THEN next_poll_at END,id LIMIT 1
       """)
         .param("now", now)
         .query(Row.class)
@@ -221,7 +250,7 @@ public class SourceRepository {
         .param("captured", captured.manualRequestedAt(), Types.TIMESTAMP_WITH_TIMEZONE)
         .param("result", result)
         .param("now", now)
-        .param("next", now.plusMinutes(30))
+        .param("next", schedule.next(now, result, captured.consecutiveFailures(), retryAfter))
         .param("full", full)
         .param("failed", result.equals("failed"))
         .param("replaceValidators", result.equals("success"))

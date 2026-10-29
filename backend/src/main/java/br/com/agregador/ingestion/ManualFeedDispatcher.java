@@ -1,9 +1,13 @@
 package br.com.agregador.ingestion;
 
+import br.com.agregador.auth.DatabaseFailures;
 import br.com.agregador.sources.*;
 import java.io.ByteArrayInputStream;
 import java.time.*;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.*;
@@ -14,6 +18,8 @@ import org.springframework.stereotype.Component;
 @Component
 @Profile("!demo")
 public class ManualFeedDispatcher {
+  private static final Logger log = LoggerFactory.getLogger(ManualFeedDispatcher.class);
+  private String operationalFailure;
   private final SourceRepository sources;
   private final SourceService service;
   private final CollectionActivity activity;
@@ -58,22 +64,44 @@ public class ManualFeedDispatcher {
         || !ready
         || clock.instant().isBefore(databaseRetryAt)
         || !running.compareAndSet(false, true)) return;
+    UUID sourceId = null;
+    UUID attemptId = null;
     try {
-      var next = sources.nextManual(OffsetDateTime.now(clock));
-      if (next.isEmpty()) return;
+      var next = sources.nextEligible(OffsetDateTime.now(clock));
+      if (next.isEmpty()) {
+        recovered();
+        return;
+      }
       var captured = next.get();
+      sourceId = captured.id();
+      attemptId = UUID.randomUUID();
       if (!activity.start(captured.id(), captured.lifecycleVersion())) return;
       try {
         if (!service.begin(captured)) return;
         collect(captured);
+        recovered();
       } finally {
         activity.clear();
       }
     } catch (RuntimeException databaseOrCommitFailure) {
-      // No payload/URL/SQL logging; an unconfirmed request remains durable for the next attempt.
+      String code =
+          DatabaseFailures.temporary(databaseOrCommitFailure)
+              ? "COLLECTION_DATABASE_UNAVAILABLE"
+              : "COLLECTION_UNCONFIRMED";
+      if (!code.equals(operationalFailure)) {
+        log.warn("{} sourceId={} attemptId={}", code, sourceId, attemptId);
+        operationalFailure = code;
+      }
       databaseRetryAt = clock.instant().plusSeconds(5);
     } finally {
       running.set(false);
+    }
+  }
+
+  private void recovered() {
+    if (operationalFailure != null) {
+      log.info("COLLECTION_RECOVERED");
+      operationalFailure = null;
     }
   }
 
