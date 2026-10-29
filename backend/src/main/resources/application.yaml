@@ -1,0 +1,33 @@
+server:
+  address: 127.0.0.1
+  servlet:
+    session:
+      persistent: false
+      timeout: 7d
+      cookie:
+        http-only: true
+        same-site: lax
+spring:
+  datasource:
+    url: ${JDBC_URL}
+    username: ${JDBC_USERNAME}
+    password: ${JDBC_PASSWORD}
+    hikari:
+      connection-timeout: 3000
+      validation-timeout: 1000
+      data-source-properties:
+        connectTimeout: 5
+        socketTimeout: 15
+  jdbc:
+    template:
+      query-timeout: 5s
+  sql:
+    init:
+      mode: never
+  flyway:
+    enabled: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+app:
+  base-url: ${APP_BASE_URL:http://127.0.0.1:5173}

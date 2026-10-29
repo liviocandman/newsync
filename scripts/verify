@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Gate único F-02 para Linux/WSL e CI. Não carrega .env."""
+
+import fcntl
+import hashlib
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from xml.etree import ElementTree as ET
+
+import reports
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def main():
+    # Não herdar JDBC, Spring, tokens ou opções de debug da instalação pessoal.
+    env = {key: value for key, value in os.environ.items() if re.fullmatch(
+        r"PATH|HOME|USER|JAVA_HOME|TMPDIR|CI|LANG|LC_.*|LD_LIBRARY_PATH|PLAYWRIGHT_.*|"
+        r"DOCKER_.*|TESTCONTAINERS_HOST_OVERRIDE|NODE_EXTRA_CA_CERTS|MAVEN_USER_HOME|npm_config_cache", key)}
+    run_id = os.environ.get("NEWS_E2E_RUN_ID", str(uuid.uuid4()))
+    reports.require(re.fullmatch(r"[a-zA-Z0-9-]{1,100}", run_id), "Identificação do gate inválida")
+    env["NEWS_E2E_RUN_ID"] = run_id
+    artifacts = ROOT / "artifacts"
+    artifacts.mkdir(exist_ok=True)
+    with (artifacts / ".verify.lock").open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError("Outro gate usa este checkout; aguarde ou use checkout isolado.")
+        output = artifacts / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + run_id)
+        output.mkdir()
+        summary = {"runId": run_id, "status": "running", "stages": [], "results": {}}
+        active = None
+        e2e_attempted = False
+
+        def save():
+            (output / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
+
+        def stop():
+            if active is None:
+                return
+            try:
+                os.killpg(active.pid, signal.SIGTERM)
+                active.wait(timeout=20)
+            except ProcessLookupError:
+                pass
+            except subprocess.TimeoutExpired:
+                os.killpg(active.pid, signal.SIGKILL)
+                active.wait(timeout=10)
+
+        def run(name, command, cwd=ROOT, timeout=1800):
+            nonlocal active
+            print(f"[{name}] {' '.join(command)}", flush=True)
+            started = time.monotonic()
+            code = 1
+            with (output / f"{name}.log").open("w") as log:
+                try:
+                    active = subprocess.Popen(command, cwd=cwd, env=env, stdout=log,
+                                              stderr=subprocess.STDOUT, start_new_session=True)
+                    code = active.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    code = 124
+                    stop()
+                except KeyboardInterrupt:
+                    code = 130
+                    stop()
+                    raise
+                finally:
+                    active = None
+                    summary["stages"].append({"name": name, "command": command, "exitCode": code,
+                                              "seconds": round(time.monotonic() - started, 2)})
+                    save()
+            reports.require(code == 0, f"Etapa {name} falhou (exit {code}); consulte {output / (name + '.log')}")
+
+        def archive_backend(profile):
+            destination = output / profile
+            destination.mkdir()
+            for runner in ("surefire", "failsafe"):
+                source = ROOT / "backend/target" / f"{runner}-reports"
+                target = destination / source.name
+                if source.exists():
+                    shutil.copytree(source, target)
+                    # Propriedades JVM podem conter opções externas; não são prova de teste.
+                    for path in target.glob("TEST-*.xml"):
+                        tree = ET.parse(path)
+                        properties = tree.getroot().find("properties")
+                        if properties is not None:
+                            tree.getroot().remove(properties)
+                        tree.write(path, encoding="utf-8", xml_declaration=True)
+            return destination
+
+        def interrupted(_signal, _frame):
+            raise KeyboardInterrupt
+
+        previous = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
+        print(f"Relatórios desta execução: {output}", flush=True)
+        try:
+            # Provisionamento para o check em checkout limpo; não reescreve fontes.
+            run("environment", ["python3", str(ROOT / "scripts/verify_environment.py")])
+            run("gate-tests", ["python3", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"])
+            run("npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], ROOT / "frontend", 600)
+            run("format-java", ["./mvnw", "-B", "spotless:check"], ROOT / "backend")
+            run("format-frontend", ["npm", "run", "format:check"], ROOT / "frontend")
+            for profile in ("normal", "demo"):
+                command = ["./mvnw", "-B"] + (["-Pdemo"] if profile == "demo" else []) + ["clean", "verify"]
+                try:
+                    run("backend-" + profile, command, ROOT / "backend")
+                finally:
+                    destination = archive_backend(profile)
+                summary["results"][profile] = reports.backend(destination)
+                summary["results"][profile]["jar"] = reports.jar(ROOT / "backend/target/news.jar", destination, profile)
+                save()
+            for name, command in (
+                ("typecheck", ["npm", "run", "typecheck"]),
+                ("vitest", ["npm", "test", "--", "--reporter=default", "--reporter=json", f"--outputFile={output / 'vitest.json'}"]),
+                ("frontend-build", ["npm", "run", "build"]),
+                ("chromium", ["npm", "exec", "--", "playwright", "install", "chromium"]),
+            ):
+                run(name, command, ROOT / "frontend", 600)
+                if name == "vitest":
+                    summary["results"][name] = reports.vitest(output / "vitest.json")
+                    save()
+            env["NEWS_DEMO_SHA256"] = summary["results"]["demo"]["jar"]["sha256"]
+            shutil.rmtree(ROOT / "frontend/test-results", ignore_errors=True)
+            e2e_attempted = True
+            run("playwright", ["npm", "run", "test:e2e"], ROOT / "frontend", 300)
+            summary["results"]["playwright"] = reports.playwright(ROOT / "frontend/test-results/playwright.json")
+            processes = json.loads((ROOT / "frontend/test-results/processes.json").read_text())
+            reports.require(processes == {"runId": run_id, "viteExited": True, "playwrightExited": True},
+                            "Processos E2E não encerraram")
+            summary["results"]["processes"] = processes
+            summary["status"] = "passed"
+        except KeyboardInterrupt:
+            summary.update(status="cancelled", error="Execução interrompida")
+            return_code = 130
+        except (RuntimeError, OSError, ValueError, ET.ParseError) as error:
+            summary.update(status="failed", error=str(error))
+            print(str(error), file=sys.stderr)
+            return_code = 1
+        else:
+            return_code = 0
+        finally:
+            stop()
+            # A limpeza tem prazo próprio e deve concluir após o primeiro sinal.
+            for sig in previous:
+                signal.signal(sig, signal.SIG_IGN)
+            # Segunda defesa para falha/cancelamento do worker; filtra pelo UUID próprio.
+            try:
+                run("cleanup", ["node", str(ROOT / "frontend/scripts/e2e.mjs"), "--cleanup"], timeout=90)
+            except (RuntimeError, OSError) as error:
+                summary.update(status="failed", cleanupError=str(error))
+                return_code = return_code or 1
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+            source = ROOT / "frontend/test-results"
+            if source.exists():
+                if e2e_attempted:
+                    shutil.copytree(source, output / "e2e")
+                elif (source / "cleanup.json").exists():
+                    (output / "e2e").mkdir()
+                    shutil.copy2(source / "cleanup.json", output / "e2e/cleanup.json")
+            implementation = []
+            for directory in ("backend", "frontend", "scripts", ".github"):
+                for parent, dirs, files in os.walk(ROOT / directory):
+                    dirs[:] = sorted(d for d in dirs if d not in ("target", "node_modules", "dist", "test-results", "playwright-report", "__pycache__"))
+                    for name in sorted(files):
+                        path = Path(parent) / name
+                        if name.startswith(".env"):
+                            continue
+                        implementation.append(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + str(path.relative_to(ROOT)))
+            manifest = "\n".join(sorted(implementation)) + "\n"
+            (output / "implementation.sha256").write_text(manifest)
+            summary["implementationSha256"] = hashlib.sha256(manifest.encode()).hexdigest()
+            save()
+            print(f"Gate: {summary['status']}. Evidências: {output}", flush=True)
+        return return_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

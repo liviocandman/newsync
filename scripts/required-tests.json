@@ -1,0 +1,44 @@
+{
+  "surefire": {
+    "br.com.agregador.ingestion.FeedParserTest": {
+      "treatsEmptyMarkupAndRemovedActiveContentAsAbsentBody": 1,
+      "sanitizesHtmlThatWillBeStored": 1,
+      "rejectsExternalEntitiesWithoutMakingARequest": 1
+    }
+  },
+  "failsafe": {
+    "br.com.agregador.DatabaseIT": {
+      "normalProfileHasNoInitializerOrAnonymousApi": 1,
+      "reimportsAndMergesWithoutLosingIdentityStateOrMissingFields": 1,
+      "t36RollsBackArticlesAndSourceMetadataWhenCommitFails": 1,
+      "migratesAnEmptyPostgres": 1
+    },
+    "br.com.agregador.DemoHttpIT": {
+      "bootIsIdempotentAndReadyOnlyAfterImport": 1,
+      "detailContractForBodyAbsentBodyAndPreservedBody": 1,
+      "validatesStateCsrfOriginIdsAndUnsupportedParameters": 1,
+      "t11ConcurrentIndependentHttpPatchesPreserveBothFields": 1,
+      "hostileHtmlIsCommittedSanitizedAndReturnedThroughHttp": 1
+    },
+    "br.com.agregador.MigrationFailureIT": {
+      "migrationFailurePreventsDemoReadiness": 1
+    },
+    "br.com.agregador.DemoConfigurationIT": {
+      "localHttpBootImportsAndBecomesReady": 1,
+      "invalidDemoConfigurationNeverBecomesReady": 12
+    }
+  },
+  "vitest": {
+    "src/App.test.tsx": [
+      "mantém o estado anterior quando uma gravação falha",
+      "abrir não marca lido e mostra a ausência de corpo",
+      "mostra carregamento e lista vazia",
+      "expõe falha de leitura e permite repetir"
+    ],
+    "tests/stop-process.test.ts": [
+      "cancela o prazo de A e mantém B vivo depois do prazo antigo",
+      "força somente A quando ele ignora SIGTERM e preserva B"
+    ]
+  },
+  "playwright": "abrir → marcar → recarregar → reiniciar preserva estados e bloqueia conteúdo ativo"
+}
