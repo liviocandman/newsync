@@ -77,6 +77,15 @@ beforeEach(() => {
   vi.mocked(api.search).mockResolvedValue({ items: [], hasMore: false });
 });
 afterEach(() => vi.resetAllMocks());
+it('caminho desconhecido não abre busca nem leitor por fallback', async () => {
+  show('/search/unknown');
+  expect(
+    await screen.findByRole('heading', { name: 'Página não encontrada.' }),
+  ).toBeVisible();
+  expect(screen.queryByLabelText('Termos da busca')).not.toBeInTheDocument();
+  expect(api.search).not.toHaveBeenCalled();
+  expect(api.article).not.toHaveBeenCalled();
+});
 it('mantém o estado anterior quando uma gravação falha', async () => {
   vi.mocked(api.state).mockRejectedValue(new Error('Banco indisponível.'));
   show('/articles/a');

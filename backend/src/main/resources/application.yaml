@@ -9,6 +9,9 @@ server:
         http-only: true
         same-site: lax
 spring:
+  web:
+    resources:
+      add-mappings: false
   datasource:
     url: ${JDBC_URL}
     username: ${JDBC_USERNAME}
@@ -31,4 +34,4 @@ spring:
     deserialization:
       fail-on-unknown-properties: true
 app:
-  base-url: ${APP_BASE_URL:http://127.0.0.1:5173}
+  base-url: ${APP_BASE_URL:http://127.0.0.1:8080}

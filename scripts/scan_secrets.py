@@ -56,7 +56,7 @@ def main():
         for name in ("backend", "frontend", "scripts", ".github"):
             shutil.copytree(ROOT / name, staged / name, ignore=ignored)
         for name in ("README.md", "compose.yaml", "compose.local.yaml", ".gitignore",
-                     ".env.example", ".env.local.example"):
+                     ".env.example", ".env.local.example", "Dockerfile", ".dockerignore", "compose.app.yaml"):
             shutil.copy2(ROOT / name, staged / name)
         result = subprocess.run([str(executable), "dir", str(staged), "--no-banner", "--redact=100",
                                  "--log-level=error", "--report-format=json", "--report-path=" + str(report)],

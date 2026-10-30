@@ -3,10 +3,35 @@ import react from '@vitejs/plugin-react';
 import { randomBytes } from 'node:crypto';
 const nonce = randomBytes(18).toString('base64');
 const csp = `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:*; img-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
-export default defineConfig({
-  envDir: process.env.NEWS_E2E_RUN_ID ? false : undefined,
-  plugins: [react()],
-  html: { cspNonce: nonce },
+export default defineConfig(({ command, mode }) => ({
+  envDir:
+    command === 'build' || process.env.NEWS_E2E_RUN_ID ? false : undefined,
+  define:
+    command === 'build'
+      ? {
+          'import.meta.env.VITE_APP_MODE': JSON.stringify(
+            mode === 'demo' ? 'demo' : 'normal',
+          ),
+        }
+      : {},
+  plugins: [
+    react(),
+    {
+      name: 'packaged-ui-mode',
+      apply: 'build',
+      transformIndexHtml: () => [
+        {
+          tag: 'meta',
+          attrs: {
+            name: 'news-ui-mode',
+            content: mode === 'demo' ? 'demo' : 'normal',
+          },
+          injectTo: 'head',
+        },
+      ],
+    },
+  ],
+  html: command === 'serve' ? { cspNonce: nonce } : undefined,
   server: {
     host: '127.0.0.1',
     strictPort: true,
@@ -36,4 +61,4 @@ export default defineConfig({
     setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/**/*.test.ts'],
   },
-});
+}));

@@ -32,6 +32,7 @@ class DatabaseIT {
 
   @DynamicPropertySource
   static void database(DynamicPropertyRegistry properties) {
+    properties.add("app.base-url", () -> "http://127.0.0.1:5173");
     properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     properties.add("spring.datasource.username", POSTGRES::getUsername);
     properties.add("spring.datasource.password", POSTGRES::getPassword);

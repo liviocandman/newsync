@@ -121,77 +121,90 @@ if (process.argv.includes('--cleanup')) {
       resolve(frontend, 'test-results/jars.json'),
       JSON.stringify(jarProof, null, 2) + '\n',
     );
-    for (const mode of ['normal', 'demo']) {
+    for (const suite of [
+      'normal',
+      'demo',
+      'packaged-normal',
+      'packaged-demo',
+    ]) {
+      const packaged = suite.startsWith('packaged-');
+      const mode = suite.endsWith('demo') ? 'demo' : 'normal';
       let viteLog = '';
       try {
         const modeEnv = {
           ...env,
-          NEWS_E2E_MODE: mode,
+          NEWS_E2E_MODE: suite,
+          ...(packaged ? { NEWS_E2E_PACKAGED: '1' } : {}),
           VITE_APP_MODE: mode,
           API_PROXY_TARGET: 'http://127.0.0.1:18080',
         };
-        vite = spawn(
-          process.execPath,
-          [
-            resolve(frontend, 'node_modules/vite/bin/vite.js'),
-            '--port',
-            '5174',
-          ],
-          {
-            cwd: frontend,
-            env: modeEnv,
-            stdio: ['ignore', 'pipe', 'pipe'],
-            detached: true,
-          },
-        );
-        for (const stream of [vite.stdout, vite.stderr])
-          stream.on('data', (chunk) => {
-            viteLog = (viteLog + chunk.toString()).slice(-262144);
+        vite = undefined;
+        if (!packaged) {
+          vite = spawn(
+            process.execPath,
+            [
+              resolve(frontend, 'node_modules/vite/bin/vite.js'),
+              '--port',
+              '5174',
+            ],
+            {
+              cwd: frontend,
+              env: modeEnv,
+              stdio: ['ignore', 'pipe', 'pipe'],
+              detached: true,
+            },
+          );
+          for (const stream of [vite.stdout, vite.stderr])
+            stream.on('data', (chunk) => {
+              viteLog = (viteLog + chunk.toString()).slice(-262144);
+            });
+          let spawnError;
+          vite.on('error', (error) => {
+            spawnError = error;
           });
-        let spawnError;
-        vite.on('error', (error) => {
-          spawnError = error;
-        });
-        const deadline = Date.now() + 30_000;
-        while (true) {
-          if (spawnError) throw spawnError;
-          if (signalExit)
-            throw new Error('E2E interrompido durante inicialização.');
-          if (
-            vite.exitCode !== null ||
-            vite.signalCode !== null ||
-            Date.now() > deadline
-          )
-            throw new Error(
-              `Vite ${mode} não iniciou; consulte vite-${mode}.log.`,
-            );
-          try {
+          const deadline = Date.now() + 30_000;
+          while (true) {
+            if (spawnError) throw spawnError;
+            if (signalExit)
+              throw new Error('E2E interrompido durante inicialização.');
             if (
-              (
-                await fetch('http://127.0.0.1:5174', {
-                  signal: AbortSignal.timeout(1000),
-                })
-              ).ok
+              vite.exitCode !== null ||
+              vite.signalCode !== null ||
+              Date.now() > deadline
             )
-              break;
-          } catch {
-            /* Esperar o processo próprio. */
+              throw new Error(
+                `Vite ${mode} não iniciou; consulte vite-${mode}.log.`,
+              );
+            try {
+              if (
+                (
+                  await fetch('http://127.0.0.1:5174', {
+                    signal: AbortSignal.timeout(1000),
+                  })
+                ).ok
+              )
+                break;
+            } catch {
+              /* Esperar o processo próprio. */
+            }
+            await delay(100);
           }
-          await delay(100);
         }
         child = spawn(
           process.execPath,
           [
             resolve(frontend, 'node_modules/@playwright/test/cli.js'),
             'test',
-            ...(mode === 'normal'
-              ? [
-                  'normal.spec.ts',
-                  'normal-pending.spec.ts',
-                  'agenda.spec.ts',
-                  'search.spec.ts',
-                ]
-              : ['demo.spec.ts']),
+            ...(suite === 'packaged-normal'
+              ? ['packaged.spec.ts']
+              : mode === 'normal'
+                ? [
+                    'normal.spec.ts',
+                    'normal-pending.spec.ts',
+                    'agenda.spec.ts',
+                    'search.spec.ts',
+                  ]
+                : ['demo.spec.ts']),
             ...process.argv.slice(2),
           ],
           { cwd: frontend, env: modeEnv, stdio: 'inherit', detached: true },
@@ -208,7 +221,7 @@ if (process.argv.includes('--cleanup')) {
         } finally {
           killGroup(vite, 'SIGKILL');
           writeFileSync(
-            resolve(frontend, `test-results/vite-${mode}.log`),
+            resolve(frontend, `test-results/vite-${suite}.log`),
             viteLog,
           );
           const exited = (processToCheck) =>

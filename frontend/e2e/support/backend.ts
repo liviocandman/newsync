@@ -10,6 +10,9 @@ import { stopProcess } from './stop-process.ts';
 
 const image =
   'postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db';
+export const uiOrigin = process.env.NEWS_E2E_PACKAGED
+  ? 'http://127.0.0.1:18080'
+  : 'http://127.0.0.1:5174';
 type StartOptions = { collectionEnabled?: boolean };
 export class TestBackend {
   private readonly container: string;
@@ -135,7 +138,7 @@ export class TestBackend {
           JDBC_URL: this.jdbcUrl,
           JDBC_USERNAME: 'b03_test',
           JDBC_PASSWORD: this.password,
-          APP_BASE_URL: 'http://127.0.0.1:5174',
+          APP_BASE_URL: uiOrigin,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },

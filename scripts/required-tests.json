@@ -75,7 +75,8 @@
       "validatesStateCsrfOriginIdsAndUnsupportedParameters": 1,
       "t11ConcurrentIndependentHttpPatchesPreserveBothFields": 1,
       "demoRejectsRegistrationExternalRefreshAndSourceLifecycle": 1,
-      "demoSearchesOnlyItsPersistedFixtureWithoutCsrf": 1
+      "demoSearchesOnlyItsPersistedFixtureWithoutCsrf": 1,
+      "demoNeverServesSourceManagementShell": 1
     },
     "br.com.agregador.MigrationFailureIT": {
       "migrationFailurePreventsDemoReadiness": 1
@@ -124,10 +125,14 @@
     },
     "br.com.agregador.BackupRestoreIT": {
       "t20RestoresCompleteArchiveRejectsUnsafeRecoveryAndResumesDurableCollection": 1
+    },
+    "br.com.agregador.UiHttpIT": {
+      "packagedNavigationAssetsAndApiKeepDistinctSecurityAndCachePolicies": 1
     }
   },
   "vitest": {
     "src/App.test.tsx": [
+      "caminho desconhecido não abre busca nem leitor por fallback",
       "mantém o estado anterior quando uma gravação falha",
       "abrir não marca lido e mostra a ausência de corpo",
       "mostra carregamento e lista vazia",
@@ -174,6 +179,13 @@
       "pedido manual e cooldown sobrevivem ao restart com banco próprio",
       "agenda automática apresenta diagnóstico sem pedido manual",
       "busca no acervo → filtro e página → detalhe e marcação → volta com contexto"
+    ],
+    "packaged-normal": [
+      "JAR sem Vite → busca e deep link → marcação → restart e renovação única"
+    ],
+    "packaged-demo": "abrir → marcar → recarregar → reiniciar preserva estados e bloqueia conteúdo ativo",
+    "image": [
+      "imagem instalada → fonte coletada → busca → detalhe e marcação sem Vite"
     ]
   }
 }

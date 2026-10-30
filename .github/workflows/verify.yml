@@ -12,7 +12,7 @@ jobs:
   verify:
     name: F-02 / verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       NEWS_E2E_RUN_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:

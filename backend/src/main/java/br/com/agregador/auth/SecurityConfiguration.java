@@ -1,13 +1,15 @@
 package br.com.agregador.auth;
 
+import br.com.agregador.web.PackagedUi;
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.env.ConfigTreePropertySource;
 import org.springframework.context.annotation.*;
-import org.springframework.core.env.Environment;
+import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.Profiles;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -22,11 +24,18 @@ public class SecurityConfiguration {
   @Bean
   SecurityFilterChain security(
       HttpSecurity http,
-      Environment env,
+      ConfigurableEnvironment env,
+      PackagedUi ui,
       @Value("${app.base-url}") String baseUrl,
-      @Value("${server.address}") String address)
+      @Value("${server.address}") String address,
+      @Value("${app.deployment:local}") String deployment)
       throws Exception {
     boolean demo = env.acceptsProfiles(Profiles.of("demo"));
+    boolean container = deployment.equals("container-local");
+    if (!Set.of("local", "container-local").contains(deployment)
+        || (container && (demo || !ui.mode().equals("normal"))))
+      throw new IllegalStateException("Modo de implantação inválido");
+    if (container) requireContainerSecret(env);
     {
       URI origin;
       try {
@@ -35,7 +44,9 @@ public class SecurityConfiguration {
         // A mensagem do parser de URI pode conter credenciais da configuração.
         throw new IllegalStateException("Aplicação exige endereço e origem HTTP de loopback");
       }
-      if (!Set.of("127.0.0.1", "localhost", "::1", "[::1]").contains(address)
+      if (!(container
+              ? address.equals("0.0.0.0")
+              : Set.of("127.0.0.1", "localhost", "::1", "[::1]").contains(address))
           || origin.getHost() == null
           || !Set.of("127.0.0.1", "localhost", "::1", "[::1]").contains(origin.getHost())
           || !"http".equals(origin.getScheme())
@@ -50,6 +61,12 @@ public class SecurityConfiguration {
     }
     http.authorizeHttpRequests(
         auth -> {
+          auth.requestMatchers(
+                  req ->
+                      Set.of("GET", "HEAD").contains(req.getMethod())
+                          && (ui.navigation(req.getServletPath(), demo)
+                              || req.getServletPath().startsWith("/assets/")))
+              .permitAll();
           auth.requestMatchers(
                   HttpMethod.GET,
                   "/health/ready",
@@ -105,11 +122,32 @@ public class SecurityConfiguration {
     http.headers(
         headers ->
             headers
-                .contentSecurityPolicy(
-                    csp ->
-                        csp.policyDirectives(
-                            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"))
+                .addHeaderWriter(
+                    (req, res) ->
+                        res.setHeader(
+                            "Content-Security-Policy",
+                            res.getContentType() != null
+                                    && res.getContentType().startsWith("text/html")
+                                ? PackagedUi.DOCUMENT_CSP
+                                : PackagedUi.API_CSP))
                 .referrerPolicy(ref -> ref.policy(ReferrerPolicy.NO_REFERRER)));
     return http.build(); // CSRF ativo, sem login público ou HTTP Basic.
+  }
+
+  private static void requireContainerSecret(ConfigurableEnvironment env) {
+    String mountedPassword = null;
+    for (var source : env.getPropertySources()) {
+      if (source instanceof ConfigTreePropertySource tree
+          && tree.getSource().toString().equals("/run/secrets")) {
+        mountedPassword =
+            env.getConversionService()
+                .convert(tree.getProperty("spring.datasource.password"), String.class);
+      }
+    }
+    if (!"configtree:/run/secrets/".equals(env.getProperty("spring.config.import"))
+        || mountedPassword == null
+        || mountedPassword.isBlank()
+        || !mountedPassword.equals(env.getProperty("spring.datasource.password")))
+      throw new IllegalStateException("Contêiner exige configtree obrigatório e secret legível");
   }
 }

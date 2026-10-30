@@ -54,6 +54,10 @@ class ReportGateTest(unittest.TestCase):
         path = self.root / "news.jar"
         with ZipFile(path, "w") as archive:
             archive.writestr("BOOT-INF/classes/demo/feed.xml", "fixture")
+            archive.writestr("BOOT-INF/classes/web-ui/bundle.properties", "mode=demo\nassets=index-12345678.js,index-12345678.css\n")
+            archive.writestr("BOOT-INF/classes/web-ui/index.html", '<meta name="news-ui-mode" content="demo">')
+            archive.writestr("BOOT-INF/classes/web-ui/assets/index-12345678.js", "javascript")
+            archive.writestr("BOOT-INF/classes/web-ui/assets/index-12345678.css", "css")
         with self.assertRaisesRegex(RuntimeError, "normal contém"):
             reports.jar(path, self.root, "normal")
         reports.jar(path, self.root, "demo")

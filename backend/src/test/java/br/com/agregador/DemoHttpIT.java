@@ -20,6 +20,14 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("demo")
 class DemoHttpIT {
+  @Test
+  void demoNeverServesSourceManagementShell() throws Exception {
+    try (var client = client()) {
+      assertThat(get(client, "/sources").statusCode()).isEqualTo(403);
+      assertThat(get(client, "/").statusCode()).isEqualTo(200);
+    }
+  }
+
   @DynamicPropertySource
   static void database(DynamicPropertyRegistry properties) {
     DatabaseIT.database(properties);

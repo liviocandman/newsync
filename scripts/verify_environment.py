@@ -22,4 +22,7 @@ match = re.fullmatch(r"v24\.(\d+)\.\d+\s*", node)
 if not match or int(match[1]) < 15:
     raise SystemExit("O projeto exige Node >= 24.15 e < 25.")
 command("npm", "--version")
-command("docker", "version", "--format", "{{.Server.Version}}")
+engine = command("docker", "version", "--format", "{{.Server.Version}}")
+if int(engine.split(".")[0]) < 28:
+    raise SystemExit("Distribuição local exige Docker Engine >=28.")
+command("docker", "compose", "version")

@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>4.1.2</version><relativePath/></parent>
   <groupId>br.com.agregador</groupId><artifactId>news</artifactId><version>0.1.0-SNAPSHOT</version>
-  <properties><java.version>25</java.version><demo.resource.exclusion>demo/**</demo.resource.exclusion></properties>
+  <properties><java.version>25</java.version><demo.resource.exclusion>demo/**</demo.resource.exclusion><ui.mode>normal</ui.mode></properties>
   <dependencies>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-webmvc</artifactId></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security</artifactId></dependency>
@@ -19,10 +19,23 @@
     <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
     <dependency><groupId>org.testcontainers</groupId><artifactId>testcontainers-postgresql</artifactId><scope>test</scope></dependency>
   </dependencies>
-  <profiles><profile><id>demo</id><properties><demo.resource.exclusion>__no_exclusion__</demo.resource.exclusion></properties><build><resources><resource><directory>src/main/resources</directory></resource><resource><directory>src/demo/resources</directory></resource></resources></build></profile></profiles>
+  <profiles><profile><id>demo</id><properties><demo.resource.exclusion>__no_exclusion__</demo.resource.exclusion><ui.mode>demo</ui.mode></properties><build><resources><resource><directory>src/demo/resources</directory></resource></resources></build></profile></profiles>
   <build>
     <finalName>news</finalName>
+    <resources>
+      <resource><directory>src/main/resources</directory></resource>
+      <resource><directory>${project.build.directory}/generated-resources</directory></resource>
+    </resources>
     <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId><artifactId>exec-maven-plugin</artifactId><version>3.6.4</version>
+        <executions><execution><id>packaged-ui</id><phase>generate-resources</phase><goals><goal>exec</goal></goals>
+          <configuration>
+            <executable>node</executable>
+            <arguments><argument>${project.basedir}/../frontend/scripts/build-ui.mjs</argument><argument>${ui.mode}</argument><argument>${project.build.directory}</argument></arguments>
+          </configuration>
+        </execution></executions>
+      </plugin>
       <plugin>
         <groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>3.10.4</version>
         <configuration><java><googleJavaFormat><version>1.30.0</version></googleJavaFormat></java></configuration>

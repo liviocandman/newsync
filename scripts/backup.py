@@ -11,6 +11,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -66,8 +67,10 @@ class Database:
         for value in (container, database, user):
             require(re.fullmatch(r"[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}", value),
                     "Container/banco/usuário devem ser identificadores simples explícitos")
-        self.container, self.database, self.user = container, database, user
+        self.database, self.user = database, user
         info = json.loads(run(["docker", "inspect", container], operation="docker-inspect"))[0]
+        self.container = info["Id"]
+        self.info = info
         self.identity = {"containerId": info["Id"], "image": info["Image"], "database": database,
                          "user": user, "ports": info["NetworkSettings"]["Ports"],
                          "composeProject": (info["Config"].get("Labels") or {}).get("com.docker.compose.project")}
@@ -106,6 +109,46 @@ class Database:
         require(self.sql("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() "
                          "AND backend_type='client backend' AND pid<>pg_backend_pid()") == "0",
                 "Banco possui clientes conectados; encerre aplicações antes de continuar")
+
+    def stopped_container(self, container, jar):
+        require(re.fullmatch(r"[a-f0-9]{64}", container), "Informe o ID imutável completo do app")
+        app = json.loads(run(["docker", "inspect", container], operation="inspect-stopped-app"))[0]
+        state = app["State"]
+        require(app["Id"] == container and state["Status"] == "exited"
+                and not any(state.get(key) for key in ("Running", "Restarting", "Paused")),
+                "App deve estar encerrado, sem execução/restart/pausa")
+        labels = app["Config"].get("Labels") or {}
+        db_labels = self.info["Config"].get("Labels") or {}
+        project = labels.get("com.docker.compose.project")
+        require(project and project == db_labels.get("com.docker.compose.project")
+                and labels.get("com.docker.compose.service") == "app"
+                and db_labels.get("com.docker.compose.service") == "db",
+                "Contêiner não pertence ao app/db do mesmo projeto Compose")
+        environment = dict(item.split("=", 1) for item in app["Config"]["Env"] if "=" in item)
+        require(environment.get("JDBC_URL") == f"jdbc:postgresql://db:5432/{self.database}"
+                and environment.get("JDBC_USERNAME") == self.user,
+                "Configuração de banco do app diverge da origem")
+        db_environment = dict(item.split("=", 1) for item in self.info["Config"]["Env"] if "=" in item)
+        require(db_environment.get("POSTGRES_USER") == self.user,
+                "Usuário do cluster diverge da origem")
+        shared = set(app["NetworkSettings"]["Networks"]) & set(self.info["NetworkSettings"]["Networks"])
+        require(shared and any("db" in (self.info["NetworkSettings"]["Networks"][net].get("Aliases") or [])
+                               for net in shared), "App não está vinculado à rede/alias do db de origem")
+        image = json.loads(run(["docker", "image", "inspect", app["Image"]], operation="inspect-app-image"))[0]
+        digest = jar_info(jar)["sha256"]
+        require((image["Config"].get("Labels") or {}).get("news.jar.sha256") == digest,
+                "JAR não corresponde à imagem implantada")
+        # Extrair do contêiner real também detecta substituição por mount/camada gravável.
+        with tempfile.TemporaryDirectory(prefix="news-deployed-jar-") as temporary:
+            deployed = Path(temporary) / "news.jar"
+            run(["docker", "cp", container + ":/app/news.jar", str(deployed)], operation="extract-deployed-jar")
+            require(jar_info(deployed) == jar_info(jar), "JAR do app diverge do arquivo capturado")
+        require(not any(mount["Destination"].startswith("/app") for mount in app.get("Mounts", [])),
+                "App com montagem sobre o produto não é suportado")
+        self.no_clients()
+        return {"appContainerId": container, "imageId": image["Id"],
+                "imageReference": app["Config"]["Image"], "repoDigests": image.get("RepoDigests") or [],
+                "composeProject": project, "jarSha256": digest}
 
     def fingerprint(self):
         return self.json("SELECT json_build_array((SELECT system_identifier::text FROM pg_control_system()),"
@@ -156,9 +199,12 @@ def inventory(db, dump):
     return hashlib.sha256(value).hexdigest()
 
 
-def backup(db, directory, jar, pid):
+def backup(db, directory, jar, pid=None, stopped_container=None):
     directory = secure_directory(directory)
-    db.stopped(pid)
+    require((pid is None) != (stopped_container is None), "Escolha PID host OU contêiner parado")
+    deployment = db.stopped_container(stopped_container, jar) if stopped_container else None
+    if pid is not None:
+        db.stopped(pid)
     versions = db.versions()
     before = db.snapshot()
     name = datetime.now(timezone.utc).strftime("news-%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex
@@ -174,13 +220,30 @@ def backup(db, directory, jar, pid):
     listing = inventory(db, dump)
     db.no_clients()
     require(db.snapshot() == before, "Origem mudou durante a captura; pacote permanece incompleto")
+    if stopped_container:
+        require(db.stopped_container(stopped_container, jar) == deployment,
+                "Implantação mudou durante a captura")
     manifest = {"format": 1, "createdUtc": datetime.now(timezone.utc).isoformat(),
                 "source": db.identity, "sourceFingerprint": db.fingerprint(), "versions": versions,
                 "jar": jar_info(jar), "dump": {"sha256": sha(dump), "bytes": dump.stat().st_size,
                                                "inventorySha256": listing}, "snapshot": before}
+    if deployment:
+        manifest["deployment"] = deployment
     (pending / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     # Instruções da revisão que criou o pacote; sem arquivos de configuração pessoal.
-    (pending / "RESTORE.md").write_text((ROOT / "scripts/backup-guide.md").read_text())
+    guide = ROOT / "scripts/backup-guide.md"
+    if not guide.is_file():
+        guide = Path(__file__).with_name("backup-guide.md")
+    if not guide.is_file():
+        guide = Path(__file__).with_name("RESTORE.md")
+    (pending / "RESTORE.md").write_text(guide.read_text())
+    container_guide = ROOT / "scripts/install-guide.md"
+    if not container_guide.is_file():
+        container_guide = Path(__file__).with_name("install-guide.md")
+    if not container_guide.is_file():
+        container_guide = Path(__file__).with_name("INSTALL.md")
+    if container_guide.is_file():
+        (pending / "INSTALL.md").write_text(container_guide.read_text())
     (pending / "backup.py").write_bytes(Path(__file__).read_bytes())
     (pending / "configuration.txt").write_text(
         "JDBC_URL\nJDBC_USERNAME\nJDBC_PASSWORD\nAPP_BASE_URL\napp.collection.enabled=false\n"
@@ -233,7 +296,9 @@ def main():
     parser.add_argument("--user", required=True)
     parser.add_argument("--jar", type=Path, required=True)
     parser.add_argument("--directory", type=Path)
-    parser.add_argument("--stopped-pid", type=int)
+    stopped = parser.add_mutually_exclusive_group()
+    stopped.add_argument("--stopped-pid", type=int)
+    stopped.add_argument("--stopped-container")
     parser.add_argument("--package", type=Path)
     parser.add_argument("--receipt", type=Path)
     args = parser.parse_args()
@@ -242,9 +307,9 @@ def main():
     try:
         db = Database(args.container, args.database, args.user)
         if args.action == "backup":
-            require(args.directory is not None and args.stopped_pid is not None,
-                    "Backup exige --directory e --stopped-pid")
-            backup(db, args.directory, args.jar, args.stopped_pid)
+            require(args.directory is not None and (args.stopped_pid is not None or args.stopped_container),
+                    "Backup exige --directory e --stopped-pid OU --stopped-container")
+            backup(db, args.directory, args.jar, args.stopped_pid, args.stopped_container)
         else:
             require(args.package is not None and args.receipt is not None,
                     "Restore exige --package e --receipt")

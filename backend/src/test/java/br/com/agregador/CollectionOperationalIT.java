@@ -27,6 +27,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {
+      "app.base-url=http://127.0.0.1:5173",
       "app.collection.initial-delay-ms=3600000",
       "spring.datasource.hikari.maximum-pool-size=2",
       "spring.datasource.hikari.minimum-idle=0"

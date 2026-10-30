@@ -17,7 +17,9 @@ export default defineConfig({
   use: {
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
-    baseURL: 'http://127.0.0.1:5174',
+    baseURL: process.env.NEWS_E2E_PACKAGED
+      ? 'http://127.0.0.1:18080'
+      : 'http://127.0.0.1:5174',
     viewport: { width: 1280, height: 900 },
     // Traces de rede incluiriam cookies e respostas CSRF. Guardar relatório/captura.
     trace: 'off',

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -57,11 +58,25 @@ def jar(path, folder, profile):
     else:
         require([entry for entry in demo if not entry.endswith("/")] == [prefix + "feed.xml"],
                 "JAR demo deve conter somente a fixture fixa")
+    with ZipFile(path) as archive:
+        prefix = "BOOT-INF/classes/web-ui/"
+        require(prefix + "bundle.properties" in entries and prefix + "index.html" in entries,
+                "JAR sem UI empacotada")
+        properties = dict(line.split("=", 1) for line in archive.read(prefix + "bundle.properties").decode().splitlines())
+        require(properties.get("mode") == profile, "UI incompatível com o perfil do JAR")
+        assets = properties.get("assets", "").split(",")
+        require(any(name.endswith(".js") for name in assets) and any(name.endswith(".css") for name in assets)
+                and all(re.fullmatch(r"[a-zA-Z0-9_-]+-[a-zA-Z0-9_-]{8,}\.(js|css)", name)
+                        and prefix + "assets/" + name in entries for name in assets), "Inventário UI incompleto")
+        html = archive.read(prefix + "index.html").decode()
+        require(f'name="news-ui-mode" content="{profile}"' in html
+                and not re.search(r'nonce=|@vite|<style|<script(?![^>]*\bsrc=)', html, re.I),
+                "HTML incompatível com CSP produtiva")
     with path.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     (folder / "jar-inventory.txt").write_text("\n".join(entries) + "\n")
     (folder / "jar.sha256").write_text(digest + "  news.jar\n")
-    return {"sha256": digest, "demoEntries": demo, "entries": len(entries)}
+    return {"sha256": digest, "demoEntries": demo, "entries": len(entries), "uiMode": profile, "uiAssets": assets}
 
 
 def vitest(path):

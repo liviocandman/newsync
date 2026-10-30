@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { TestBackend } from './support/backend.ts';
+import { TestBackend, uiOrigin } from './support/backend.ts';
 const backend = new TestBackend('demo');
 test.beforeAll(async () => {
   await backend.create();
@@ -49,7 +49,7 @@ test('abrir → marcar → recarregar → reiniciar preserva estados e bloqueia 
 }, testInfo) => {
   const external: string[] = [];
   page.context().on('request', (request) => {
-    if (new URL(request.url()).origin !== 'http://127.0.0.1:5174')
+    if (new URL(request.url()).origin !== uiOrigin)
       external.push(request.url());
   });
   await page.goto('/');

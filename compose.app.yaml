@@ -1,0 +1,47 @@
+name: news-personal-app
+services:
+  app:
+    image: ${NEWS_APP_IMAGE:?Informe o image ID sha256 ou RepoDigest verificado}
+    pull_policy: never
+    platform: linux/amd64
+    environment:
+      JDBC_URL: jdbc:postgresql://db:5432/news_personal
+      JDBC_USERNAME: news_personal
+      APP_BASE_URL: http://127.0.0.1:${NEWS_APP_PORT:-8080}
+      APP_COLLECTION_ENABLED: ${NEWS_COLLECTION_ENABLED:-false}
+    ports:
+      - "127.0.0.1:${NEWS_APP_PORT:-8080}:8080"
+    secrets:
+      - source: db_password
+        target: spring.datasource.password
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  db:
+    image: postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: news_personal
+      POSTGRES_USER: news_personal
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes:
+      - app_pg18:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U news_personal -d news_personal"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: "no"
+secrets:
+  db_password:
+    file: ${NEWS_DB_SECRET_FILE:?Informe arquivo privado fora do checkout}
+volumes:
+  app_pg18:

@@ -293,11 +293,12 @@ export function App() {
         </aside>
         <main className={styles.main}>
           <Routes>
-            <Route path="/search/*" element={<SearchScreen />} />
+            <Route path="/search" element={<SearchResults />} />
+            <Route path="/search/articles/:id" element={<SearchScreen />} />
             <Route path="/articles/:id" element={<Reader />} />
             {!demo && <Route path="/sources" element={<SourcesScreen />} />}
             <Route
-              path="*"
+              path="/"
               element={
                 <div className={styles.welcome}>
                   <span className={styles.eyebrow}>SEU ESPAÇO DE LEITURA</span>
@@ -319,6 +320,7 @@ export function App() {
                 </div>
               }
             />
+            <Route path="*" element={<h2>Página não encontrada.</h2>} />
           </Routes>
         </main>
       </div>
@@ -328,18 +330,10 @@ export function App() {
 function SearchScreen() {
   const [params] = useSearchParams();
   return (
-    <Routes>
-      <Route
-        path="articles/:id"
-        element={
-          <>
-            <Link to={`/search?${params}`}>Voltar à busca</Link>
-            <Reader />
-          </>
-        }
-      />
-      <Route path="*" element={<SearchResults />} />
-    </Routes>
+    <>
+      <Link to={`/search?${params}`}>Voltar à busca</Link>
+      <Reader />
+    </>
   );
 }
 function SourcesScreen() {

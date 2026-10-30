@@ -26,6 +26,8 @@ def main():
     env = {key: value for key, value in os.environ.items() if re.fullmatch(
         r"PATH|HOME|USER|JAVA_HOME|TMPDIR|CI|LANG|LC_.*|LD_LIBRARY_PATH|PLAYWRIGHT_.*|"
         r"DOCKER_.*|TESTCONTAINERS_HOST_OVERRIDE|NODE_EXTRA_CA_CERTS|MAVEN_USER_HOME|npm_config_cache", key)}
+    if os.environ.get("NEWS_LEGACY_JAR"):
+        env["NEWS_LEGACY_JAR"] = str(Path(os.environ["NEWS_LEGACY_JAR"]).resolve())
     run_id = os.environ.get("NEWS_E2E_RUN_ID", str(uuid.uuid4()))
     reports.require(re.fullmatch(r"[a-zA-Z0-9-]{1,100}", run_id), "Identificação do gate inválida")
     env["NEWS_E2E_RUN_ID"] = run_id
@@ -150,15 +152,35 @@ def main():
                 env["NEWS_" + profile.upper() + "_JAR"] = str(output / profile / "news.jar")
             shutil.rmtree(ROOT / "frontend/test-results", ignore_errors=True)
             e2e_attempted = True
-            run("playwright", ["npm", "run", "test:e2e"], ROOT / "frontend", 600)
+            run("playwright", ["npm", "run", "test:e2e"], ROOT / "frontend", 900)
             summary["results"]["playwright"] = {
                 profile: reports.playwright(ROOT / ("frontend/test-results/playwright-" + profile + ".json"), profile)
-                for profile in ("normal", "demo")
+                for profile in ("normal", "demo", "packaged-normal", "packaged-demo")
             }
             processes = json.loads((ROOT / "frontend/test-results/processes.json").read_text())
             reports.require(processes == {"runId": run_id, "viteExited": True, "playwrightExited": True},
                             "Processos E2E não encerraram")
             summary["results"]["processes"] = processes
+            revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() + "-working-tree"
+            run("image", ["python3", str(ROOT / "scripts/build_image.py"),
+                          "--jar", env["NEWS_NORMAL_JAR"], "--sha256", env["NEWS_NORMAL_SHA256"],
+                          "--revision", revision, "--output", str(output / "distribution"), "--save"], timeout=1200)
+            summary["results"]["image"] = json.loads((output / "distribution/image.json").read_text())
+            run("installation", ["python3", str(ROOT / "scripts/installation_test.py"),
+                                 "--image", str(output / "distribution/image.json"),
+                                 "--jar", env["NEWS_NORMAL_JAR"], "--output", str(output / "installation")]
+                + (["--legacy-jar", env["NEWS_LEGACY_JAR"]] if "NEWS_LEGACY_JAR" in env else []), timeout=1200)
+            t19 = json.loads((output / "installation/t19.json").read_text())
+            required_t19 = {"clean-install", "public-feed-without-product-bypass", "image-browser", "restart-csrf",
+                            "live-wrong-container-rejected", "stopped-container-backup", "identified-upgrade",
+                            "migration-failure-not-ready", "packaged-helper-restore-new-cluster",
+                            "previous-image-recovery", "no-collection-during-recovery", "deliberate-resume-recovered-installation"}
+            reports.require(t19.get("status") == "passed" and t19.get("cleanup") is True
+                            and required_t19 <= set(t19.get("scenarios", []))
+                            and t19.get("cacheUpdate", {}).get("status") == "passed"
+                            and set(t19.get("configurationNegatives", [])) == {"missing-secret", "unreadable-secret", "demo-container", "unknown-deployment", "non-loopback-origin"},
+                            "T-19 ausente/incompleto")
+            summary["results"]["installation"] = t19
             summary["status"] = "passed"
         except KeyboardInterrupt:
             summary.update(status="cancelled", error="Execução interrompida")
@@ -176,6 +198,8 @@ def main():
                 signal.signal(sig, signal.SIG_IGN)
             # Segunda defesa para falha/cancelamento do worker; filtra pelo UUID próprio.
             try:
+                run("cleanup-installation", ["python3", str(ROOT / "scripts/installation_test.py"),
+                                             "--cleanup", "--output", str(output / "installation")], timeout=90)
                 run("cleanup", ["node", str(ROOT / "frontend/scripts/e2e.mjs"), "--cleanup"], timeout=90)
             except (RuntimeError, OSError) as error:
                 summary.update(status="failed", cleanupError=str(error))
@@ -190,6 +214,9 @@ def main():
                     (output / "e2e").mkdir()
                     shutil.copy2(source / "cleanup.json", output / "e2e/cleanup.json")
             implementation = []
+            for name in ("Dockerfile", ".dockerignore", "compose.app.yaml"):
+                path = ROOT / name
+                implementation.append(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + name)
             for directory in ("backend", "frontend", "scripts", ".github"):
                 for parent, dirs, files in os.walk(ROOT / directory):
                     dirs[:] = sorted(d for d in dirs if d not in ("target", "node_modules", "dist", "test-results", "playwright-report", "__pycache__"))
