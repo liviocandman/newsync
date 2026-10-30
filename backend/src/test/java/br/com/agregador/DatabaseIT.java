@@ -3,10 +3,15 @@ package br.com.agregador;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import br.com.agregador.ingestion.*;
+import br.com.agregador.ingestion.CollectionWriter;
+import br.com.agregador.ingestion.FeedImporter;
+import br.com.agregador.ingestion.FeedParser;
 import br.com.agregador.sources.SourceRepository;
 import java.io.InputStream;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.support.AopUtils;
@@ -21,7 +26,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = "app.collection.enabled=false")
 class DatabaseIT {
-  // Sem disabledWithoutDocker: indisponibilidade precisa falhar o verify.
+  // No disabledWithoutDocker: unavailability must fail verify.
   static final PostgreSQLContainer POSTGRES =
       new PostgreSQLContainer(
           "postgres@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db");
@@ -63,6 +68,7 @@ class DatabaseIT {
   @Autowired FeedParser parser;
   @Autowired CollectionWriter writer;
   @Autowired SourceRepository sources;
+  @Autowired br.com.agregador.sources.SourceService service;
   @Autowired br.com.agregador.articles.ArticleRepository articles;
 
   @BeforeEach
@@ -164,7 +170,8 @@ class DatabaseIT {
       assertThatThrownBy(() -> writer.confirm(source, 0, new FeedParser.Feed(changed, false)))
           .isInstanceOf(RuntimeException.class)
           .hasStackTraceContaining("test-only deferred confirmation failure");
-      // Leituras novas, fora da transação que tentou confirmar. Sem @Transactional no teste.
+      // Fresh reads outside the transaction that attempted confirmation. No @Transactional on the
+      // test.
       assertThat(jdbc.sql("SELECT * FROM articles ORDER BY id").query().listOfRows())
           .isEqualTo(beforeArticles);
       assertThat(jdbc.sql("SELECT * FROM sources ORDER BY id").query().listOfRows())
@@ -501,7 +508,7 @@ class DatabaseIT {
                       changed,
                       captured.manualRequestedAt(),
                       resolved ->
-                          sources.complete(
+                          service.complete(
                               captured,
                               resolved.partial() ? "partial" : "success",
                               "replacement",

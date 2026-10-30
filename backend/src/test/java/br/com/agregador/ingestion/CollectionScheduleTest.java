@@ -1,8 +1,8 @@
 package br.com.agregador.ingestion;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
-import java.time.*;
+import java.time.OffsetDateTime;
 import org.junit.jupiter.api.Test;
 
 class CollectionScheduleTest {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gate único F-02 para Linux/WSL e CI. Não carrega .env."""
+"""Single verification gate for Linux/WSL and CI. Never loads .env."""
 
 import fcntl
 import hashlib
@@ -12,24 +12,34 @@ import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+import delivery
 import reports
+from quality_tools import TOOLS
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def main():
-    # Não herdar JDBC, Spring, tokens ou opções de debug da instalação pessoal.
-    env = {key: value for key, value in os.environ.items() if re.fullmatch(
-        r"PATH|HOME|USER|JAVA_HOME|TMPDIR|CI|LANG|LC_.*|LD_LIBRARY_PATH|PLAYWRIGHT_.*|"
-        r"DOCKER_.*|TESTCONTAINERS_HOST_OVERRIDE|NODE_EXTRA_CA_CERTS|MAVEN_USER_HOME|npm_config_cache", key)}
+    # Do not inherit JDBC, Spring, tokens, or debugging options from the personal installation.
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if re.fullmatch(
+            r"PATH|HOME|USER|JAVA_HOME|TMPDIR|CI|LANG|LC_.*|LD_LIBRARY_PATH|PLAYWRIGHT_.*|"
+            r"DOCKER_.*|TESTCONTAINERS_HOST_OVERRIDE|NODE_EXTRA_CA_CERTS|MAVEN_USER_HOME|npm_config_cache|NEWS_TOOLS_DIR",
+            key,
+        )
+    }
     if os.environ.get("NEWS_LEGACY_JAR"):
         env["NEWS_LEGACY_JAR"] = str(Path(os.environ["NEWS_LEGACY_JAR"]).resolve())
     run_id = os.environ.get("NEWS_E2E_RUN_ID", str(uuid.uuid4()))
-    reports.require(re.fullmatch(r"[a-zA-Z0-9-]{1,100}", run_id), "Identificação do gate inválida")
+    reports.require(
+        re.fullmatch(r"[a-zA-Z0-9-]{1,100}", run_id), "Identificação do gate inválida"
+    )
     env["NEWS_E2E_RUN_ID"] = run_id
     artifacts = ROOT / "artifacts"
     artifacts.mkdir(exist_ok=True)
@@ -37,15 +47,25 @@ def main():
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise RuntimeError("Outro gate usa este checkout; aguarde ou use checkout isolado.")
-        output = artifacts / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + run_id)
+            raise RuntimeError(
+                "Outro gate usa este checkout; aguarde ou use checkout isolado."
+            ) from None
+        output = artifacts / (datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ-") + run_id)
         output.mkdir()
-        summary = {"runId": run_id, "status": "running", "stages": [], "results": {}}
+        summary = {
+            "runId": run_id,
+            "status": "running",
+            "stages": [],
+            "results": {},
+            "toolVersions": {"python": sys.version.split()[0]},
+        }
         active = None
         e2e_attempted = False
 
         def save():
-            (output / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
+            (output / "summary.json").write_text(
+                json.dumps(summary, indent=2, ensure_ascii=False) + "\n"
+            )
 
         def stop():
             if active is None:
@@ -59,15 +79,21 @@ def main():
                 os.killpg(active.pid, signal.SIGKILL)
                 active.wait(timeout=10)
 
-        def run(name, command, cwd=ROOT, timeout=1800):
+        def run(name, command, cwd=ROOT, timeout=1800, scope=None, report_paths=()):
             nonlocal active
             print(f"[{name}] {' '.join(command)}", flush=True)
             started = time.monotonic()
             code = 1
             with (output / f"{name}.log").open("w") as log:
                 try:
-                    active = subprocess.Popen(command, cwd=cwd, env=env, stdout=log,
-                                              stderr=subprocess.STDOUT, start_new_session=True)
+                    active = subprocess.Popen(
+                        command,
+                        cwd=cwd,
+                        env=env,
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
                     code = active.wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     code = 124
@@ -78,10 +104,31 @@ def main():
                     raise
                 finally:
                     active = None
-                    summary["stages"].append({"name": name, "command": command, "exitCode": code,
-                                              "seconds": round(time.monotonic() - started, 2)})
+                    summary["stages"].append(
+                        {
+                            "name": name,
+                            "command": command,
+                            "exitCode": code,
+                            "seconds": round(time.monotonic() - started, 2),
+                            "cwd": str(cwd.relative_to(ROOT)),
+                            "scope": scope or command[1:],
+                            "toolVersions": dict(summary["toolVersions"]),
+                            "reports": [
+                                {
+                                    "path": str(path.relative_to(output)),
+                                    "discovered": path.is_file(),
+                                }
+                                for path in (output / f"{name}.log", *report_paths)
+                            ],
+                        }
+                    )
                     save()
-            reports.require(code == 0, f"Etapa {name} falhou (exit {code}); consulte {output / (name + '.log')}")
+            reports.require(
+                code == 0,
+                f"Etapa {name} falhou (exit {code}); consulte {output / (name + '.log')}",
+            )
+            for path in report_paths:
+                reports.require(path.is_file(), f"Required report missing: {path}")
 
         def archive_backend(profile):
             destination = output / profile
@@ -91,7 +138,7 @@ def main():
                 target = destination / source.name
                 if source.exists():
                     shutil.copytree(source, target)
-                    # Propriedades JVM podem conter opções externas; não são prova de teste.
+                    # JVM properties may contain external options; they are not test evidence.
                     for path in target.glob("TEST-*.xml"):
                         tree = ET.parse(path)
                         properties = tree.getroot().find("properties")
@@ -104,88 +151,421 @@ def main():
             scanner = ROOT / "backend/target/spotbugsXml.xml"
             if scanner.exists():
                 shutil.copy2(scanner, destination / scanner.name)
+            for name in ("coverage-unit", "coverage-integration"):
+                source = ROOT / "backend/target" / name
+                if source.exists():
+                    shutil.copytree(source, destination / name)
+            for name in (
+                "checkstyle-result.xml",
+                "checkstyle-metrics.xml",
+                "jacoco-unit.exec",
+                "jacoco-integration.exec",
+            ):
+                source = ROOT / "backend/target" / name
+                if source.exists():
+                    shutil.copy2(source, destination / name)
             return destination
 
         def interrupted(_signal, _frame):
             raise KeyboardInterrupt
 
-        previous = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
+        previous = {
+            sig: signal.signal(sig, interrupted)
+            for sig in (signal.SIGINT, signal.SIGTERM)
+        }
         print(f"Relatórios desta execução: {output}", flush=True)
         try:
-            # Provisionamento para o check em checkout limpo; não reescreve fontes.
-            run("environment", ["python3", str(ROOT / "scripts/verify_environment.py")])
-            run("gate-tests", ["python3", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"])
-            run("secrets", ["python3", str(ROOT / "scripts/scan_secrets.py"), str(output / "gitleaks.json")], timeout=300)
-            reports.require(json.loads((output / "gitleaks.json").read_text()) == [], "Varredura de segredos não aprovada")
-            summary["results"]["gitleaks"] = {"version": "8.30.1", "findings": 0}
-            run("npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], ROOT / "frontend", 600)
-            run("audit-frontend", ["npm", "audit", "--omit=dev", "--audit-level=high"], ROOT / "frontend", 300)
+            pom = ET.parse(ROOT / "backend/pom.xml").getroot()
+            for plugin in pom.findall(".//{*}plugin") + pom.findall(".//{*}dependency"):
+                artifact = plugin.findtext("{*}artifactId")
+                version = plugin.findtext("{*}version")
+                if version:
+                    summary["toolVersions"]["backend/" + artifact] = version
+            summary["toolVersions"]["google-java-format"] = pom.findtext(
+                ".//{*}googleJavaFormat/{*}version"
+            )
+            summary["toolVersions"]["gitleaks"] = "8.30.1"
+            # Provision checks for a fresh checkout without rewriting source files.
+            run(
+                "environment",
+                [
+                    "python3",
+                    str(ROOT / "scripts/verify_environment.py"),
+                    str(output / "environment.json"),
+                ],
+                timeout=150,
+                report_paths=(output / "environment.json",),
+            )
+            summary["toolVersions"].update(
+                json.loads((output / "environment.json").read_text())
+            )
+            run(
+                "delivery",
+                ["python3", "scripts/delivery.py"],
+                scope=["config/delivery-files.json"],
+            )
+            run(
+                "npm-ci-tools",
+                ["npm", "ci", "--no-audit", "--no-fund"],
+                ROOT / "tools/quality",
+                600,
+            )
+            run(
+                "npm-ci",
+                ["npm", "ci", "--no-audit", "--no-fund"],
+                ROOT / "frontend",
+                600,
+            )
+            for directory in ("frontend", "tools/quality"):
+                declared = json.loads((ROOT / directory / "package.json").read_text())
+                for name, expected in declared["devDependencies"].items():
+                    actual = json.loads(
+                        (
+                            ROOT / directory / "node_modules" / name / "package.json"
+                        ).read_text()
+                    )["version"]
+                    reports.require(
+                        actual == expected,
+                        f"Installed tool version differs: {directory}/{name}",
+                    )
+                    summary["toolVersions"][directory + "/" + name] = actual
+            for tool in ("ruff", "trivy"):
+                run(
+                    "tool-" + tool,
+                    ["python3", "scripts/quality_tools.py", tool, "--version"],
+                    timeout=600,
+                )
+                summary["toolVersions"][tool] = TOOLS[tool]["version"]
+            run(
+                "format-files",
+                ["python3", "scripts/format_check.py"],
+                scope=delivery.files(),
+            )
             run("format-java", ["./mvnw", "-B", "spotless:check"], ROOT / "backend")
-            run("format-frontend", ["npm", "run", "format:check"], ROOT / "frontend")
+            run(
+                "format-python",
+                [
+                    "python3",
+                    "scripts/quality_tools.py",
+                    "ruff",
+                    "format",
+                    "--check",
+                    ".",
+                ],
+            )
+            run(
+                "lint-python",
+                ["python3", "scripts/quality_tools.py", "ruff", "check", "."],
+            )
+            run("lint-frontend", ["npm", "--prefix", "tools/quality", "run", "lint"])
+            run("lint-java", ["./mvnw", "-B", "checkstyle:check"], ROOT / "backend")
+            run(
+                "quality-probes",
+                [
+                    "python3",
+                    "scripts/quality_probes.py",
+                    "--output",
+                    str(output / "quality-probes.json"),
+                ],
+                timeout=600,
+                report_paths=(output / "quality-probes.json",),
+            )
+            run("link-tests", ["node", "--test", "scripts/check_links.test.mjs"])
+            run(
+                "links",
+                ["node", "scripts/check_links.mjs"],
+                scope=[name for name in delivery.files() if name.endswith(".md")],
+            )
+            run(
+                "source-snapshot",
+                [
+                    "python3",
+                    "scripts/delivery.py",
+                    "--snapshot",
+                    str(output / "source-snapshot"),
+                ],
+            )
+            run(
+                "snapshot-links",
+                ["node", "scripts/check_links.mjs", str(output / "source-snapshot")],
+            )
+            run(
+                "gate-tests",
+                [
+                    "python3",
+                    "-m",
+                    "unittest",
+                    "discover",
+                    "-s",
+                    "scripts",
+                    "-p",
+                    "test_*.py",
+                ],
+            )
+            run(
+                "secrets",
+                [
+                    "python3",
+                    str(ROOT / "scripts/scan_secrets.py"),
+                    str(output / "gitleaks.json"),
+                ],
+                timeout=300,
+            )
+            reports.require(
+                json.loads((output / "gitleaks.json").read_text()) == [],
+                "Varredura de segredos não aprovada",
+            )
+            summary["results"]["gitleaks"] = {"version": "8.30.1", "findings": 0}
+            run(
+                "audit-npm",
+                [
+                    "python3",
+                    "scripts/dependency_audit.py",
+                    "--npm",
+                    "--output",
+                    str(output / "audit-npm"),
+                ],
+                timeout=1000,
+                report_paths=(output / "audit-npm/decision.json",),
+            )
+            summary["results"]["auditNpm"] = json.loads(
+                (output / "audit-npm/decision.json").read_text()
+            )
             for profile in ("normal", "demo"):
-                command = ["./mvnw", "-B"] + (["-Pdemo"] if profile == "demo" else []) + ["clean", "verify"]
+                command = (
+                    ["./mvnw", "-B"]
+                    + (["-Pdemo"] if profile == "demo" else [])
+                    + ["clean", "verify"]
+                )
                 try:
                     run("backend-" + profile, command, ROOT / "backend")
                 finally:
                     destination = archive_backend(profile)
                 summary["results"][profile] = reports.backend(destination)
+                summary["results"][profile]["coverage"] = reports.coverage_java(
+                    destination
+                )
                 t20 = json.loads((destination / "t20-result.json").read_text())
-                reports.require(t20.get("status") == "passed" and t20.get("toolExits"), "Prova T-20 ausente/incompleta")
+                reports.require(
+                    t20.get("status") == "passed" and t20.get("toolExits"),
+                    "Prova T-20 ausente/incompleta",
+                )
                 summary["results"][profile]["backupRestore"] = t20
-                reports.require((destination / "spotbugsXml.xml").is_file(), "Relatório SpotBugs/FindSecBugs ausente")
-                summary["results"][profile]["staticAnalysis"] = "SpotBugs/FindSecBugs passed"
+                reports.require(
+                    (destination / "spotbugsXml.xml").is_file(),
+                    "Relatório SpotBugs/FindSecBugs ausente",
+                )
+                summary["results"][profile]["staticAnalysis"] = (
+                    "SpotBugs/FindSecBugs passed"
+                )
                 shutil.copy2(ROOT / "backend/target/news.jar", destination / "news.jar")
-                summary["results"][profile]["jar"] = reports.jar(destination / "news.jar", destination, profile)
+                summary["results"][profile]["jar"] = reports.jar(
+                    destination / "news.jar", destination, profile
+                )
                 save()
+            run(
+                "audit-jars",
+                [
+                    "python3",
+                    "scripts/dependency_audit.py",
+                    "--jar",
+                    "normal=" + str(output / "normal/news.jar"),
+                    "--jar",
+                    "demo=" + str(output / "demo/news.jar"),
+                    "--output",
+                    str(output / "audit-jars"),
+                ],
+                timeout=1800,
+                report_paths=(output / "audit-jars/decision.json",),
+            )
+            summary["results"]["auditJars"] = json.loads(
+                (output / "audit-jars/decision.json").read_text()
+            )
+            audited = summary["results"]["auditJars"]["targets"]
+            reports.require(
+                {item["target"] for item in audited} == {"jar:normal", "jar:demo"},
+                "Final JAR audit targets missing",
+            )
+            for item in audited:
+                profile = item["target"].split(":")[1]
+                reports.require(
+                    item["sha256"] == summary["results"][profile]["jar"]["sha256"],
+                    "Audited JAR differs from tested artifact",
+                )
+            env["NEWS_COVERAGE_DIR"] = str(output / "coverage-frontend")
             for name, command in (
                 ("typecheck", ["npm", "run", "typecheck"]),
-                ("vitest", ["npm", "test", "--", "--reporter=default", "--reporter=json", f"--outputFile={output / 'vitest.json'}"]),
+                (
+                    "vitest",
+                    [
+                        "npm",
+                        "run",
+                        "test:coverage",
+                        "--",
+                        "--reporter=default",
+                        "--reporter=json",
+                        f"--outputFile={output / 'vitest.json'}",
+                    ],
+                ),
                 ("frontend-build", ["npm", "run", "build"]),
-                ("chromium", ["npm", "exec", "--", "playwright", "install", "chromium"]),
+                (
+                    "chromium",
+                    ["npm", "exec", "--", "playwright", "install", "chromium"],
+                ),
             ):
                 run(name, command, ROOT / "frontend", 600)
                 if name == "vitest":
                     summary["results"][name] = reports.vitest(output / "vitest.json")
+                    summary["results"][name]["coverage"] = reports.coverage_frontend(
+                        output / "coverage-frontend", ROOT / "frontend/src"
+                    )
                     save()
+            run(
+                "metrics",
+                ["node", "scripts/metrics.mjs", str(output / "metrics")],
+                report_paths=(
+                    output / "metrics/complexity.json",
+                    output / "metrics/jscpd-report.json",
+                    output / "metrics/summary.json",
+                ),
+            )
+            summary["results"]["metrics"] = json.loads(
+                (output / "metrics/summary.json").read_text()
+            )
             for profile in ("normal", "demo"):
-                env["NEWS_" + profile.upper() + "_SHA256"] = summary["results"][profile]["jar"]["sha256"]
-                env["NEWS_" + profile.upper() + "_JAR"] = str(output / profile / "news.jar")
+                env["NEWS_" + profile.upper() + "_SHA256"] = summary["results"][
+                    profile
+                ]["jar"]["sha256"]
+                env["NEWS_" + profile.upper() + "_JAR"] = str(
+                    output / profile / "news.jar"
+                )
             shutil.rmtree(ROOT / "frontend/test-results", ignore_errors=True)
             e2e_attempted = True
             run("playwright", ["npm", "run", "test:e2e"], ROOT / "frontend", 900)
             summary["results"]["playwright"] = {
-                profile: reports.playwright(ROOT / ("frontend/test-results/playwright-" + profile + ".json"), profile)
+                profile: reports.playwright(
+                    ROOT / ("frontend/test-results/playwright-" + profile + ".json"),
+                    profile,
+                )
                 for profile in ("normal", "demo", "packaged-normal", "packaged-demo")
             }
-            processes = json.loads((ROOT / "frontend/test-results/processes.json").read_text())
-            reports.require(processes == {"runId": run_id, "viteExited": True, "playwrightExited": True},
-                            "Processos E2E não encerraram")
+            processes = json.loads(
+                (ROOT / "frontend/test-results/processes.json").read_text()
+            )
+            reports.require(
+                processes
+                == {"runId": run_id, "viteExited": True, "playwrightExited": True},
+                "Processos E2E não encerraram",
+            )
             summary["results"]["processes"] = processes
-            revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip() + "-working-tree"
-            run("image", ["python3", str(ROOT / "scripts/build_image.py"),
-                          "--jar", env["NEWS_NORMAL_JAR"], "--sha256", env["NEWS_NORMAL_SHA256"],
-                          "--revision", revision, "--output", str(output / "distribution"), "--save"], timeout=1200)
-            summary["results"]["image"] = json.loads((output / "distribution/image.json").read_text())
-            run("installation", ["python3", str(ROOT / "scripts/installation_test.py"),
-                                 "--image", str(output / "distribution/image.json"),
-                                 "--jar", env["NEWS_NORMAL_JAR"], "--output", str(output / "installation")]
-                + (["--legacy-jar", env["NEWS_LEGACY_JAR"]] if "NEWS_LEGACY_JAR" in env else []), timeout=1200)
+            revision = (
+                "snapshot-"
+                + hashlib.sha256(delivery.hashes().encode()).hexdigest()[:24]
+            )
+            run(
+                "image",
+                [
+                    "python3",
+                    str(ROOT / "scripts/build_image.py"),
+                    "--jar",
+                    env["NEWS_NORMAL_JAR"],
+                    "--sha256",
+                    env["NEWS_NORMAL_SHA256"],
+                    "--revision",
+                    revision,
+                    "--output",
+                    str(output / "distribution"),
+                    "--save",
+                ],
+                timeout=1200,
+            )
+            summary["results"]["image"] = json.loads(
+                (output / "distribution/image.json").read_text()
+            )
+            run(
+                "audit-images",
+                [
+                    "python3",
+                    "scripts/dependency_audit.py",
+                    "--images",
+                    str(output / "distribution/image.json"),
+                    "--output",
+                    str(output / "audit-images"),
+                ],
+                timeout=1800,
+                report_paths=(output / "audit-images/decision.json",),
+            )
+            summary["results"]["auditImages"] = json.loads(
+                (output / "audit-images/decision.json").read_text()
+            )
+            for name in ("install-guide.md", "backup-guide.md", "backup.py"):
+                reports.require(
+                    (output / "distribution" / name).read_bytes()
+                    == (ROOT / "scripts" / name).read_bytes(),
+                    f"Stale distributed helper/guide: {name}",
+                )
+            run(
+                "installation",
+                [
+                    "python3",
+                    str(ROOT / "scripts/installation_test.py"),
+                    "--image",
+                    str(output / "distribution/image.json"),
+                    "--jar",
+                    env["NEWS_NORMAL_JAR"],
+                    "--output",
+                    str(output / "installation"),
+                ]
+                + (
+                    ["--legacy-jar", env["NEWS_LEGACY_JAR"]]
+                    if "NEWS_LEGACY_JAR" in env
+                    else []
+                ),
+                timeout=1200,
+            )
             t19 = json.loads((output / "installation/t19.json").read_text())
-            required_t19 = {"clean-install", "public-feed-without-product-bypass", "image-browser", "restart-csrf",
-                            "live-wrong-container-rejected", "stopped-container-backup", "identified-upgrade",
-                            "migration-failure-not-ready", "packaged-helper-restore-new-cluster",
-                            "previous-image-recovery", "no-collection-during-recovery", "deliberate-resume-recovered-installation"}
-            reports.require(t19.get("status") == "passed" and t19.get("cleanup") is True
-                            and required_t19 <= set(t19.get("scenarios", []))
-                            and t19.get("cacheUpdate", {}).get("status") == "passed"
-                            and set(t19.get("configurationNegatives", [])) == {"missing-secret", "unreadable-secret", "demo-container", "unknown-deployment", "non-loopback-origin"},
-                            "T-19 ausente/incompleto")
+            required_t19 = {
+                "clean-install",
+                "public-feed-without-product-bypass",
+                "image-browser",
+                "restart-csrf",
+                "live-wrong-container-rejected",
+                "stopped-container-backup",
+                "identified-upgrade",
+                "migration-failure-not-ready",
+                "packaged-helper-restore-new-cluster",
+                "previous-image-recovery",
+                "no-collection-during-recovery",
+                "deliberate-resume-recovered-installation",
+            }
+            reports.require(
+                t19.get("status") == "passed"
+                and t19.get("cleanup") is True
+                and required_t19 <= set(t19.get("scenarios", []))
+                and t19.get("cacheUpdate", {}).get("status") == "passed"
+                and set(t19.get("configurationNegatives", []))
+                == {
+                    "missing-secret",
+                    "unreadable-secret",
+                    "demo-container",
+                    "unknown-deployment",
+                    "non-loopback-origin",
+                },
+                "T-19 ausente/incompleto",
+            )
             summary["results"]["installation"] = t19
             summary["status"] = "passed"
         except KeyboardInterrupt:
             summary.update(status="cancelled", error="Execução interrompida")
             return_code = 130
-        except (RuntimeError, OSError, ValueError, ET.ParseError) as error:
+        except (
+            RuntimeError,
+            OSError,
+            ValueError,
+            KeyError,
+            subprocess.SubprocessError,
+            ET.ParseError,
+        ) as error:
             summary.update(status="failed", error=str(error))
             print(str(error), file=sys.stderr)
             return_code = 1
@@ -193,14 +573,27 @@ def main():
             return_code = 0
         finally:
             stop()
-            # A limpeza tem prazo próprio e deve concluir após o primeiro sinal.
+            # Cleanup has its own deadline and must complete after the first signal.
             for sig in previous:
                 signal.signal(sig, signal.SIG_IGN)
-            # Segunda defesa para falha/cancelamento do worker; filtra pelo UUID próprio.
+            # Second defense against worker failure or cancellation; filter by this run UUID.
             try:
-                run("cleanup-installation", ["python3", str(ROOT / "scripts/installation_test.py"),
-                                             "--cleanup", "--output", str(output / "installation")], timeout=90)
-                run("cleanup", ["node", str(ROOT / "frontend/scripts/e2e.mjs"), "--cleanup"], timeout=90)
+                run(
+                    "cleanup-installation",
+                    [
+                        "python3",
+                        str(ROOT / "scripts/installation_test.py"),
+                        "--cleanup",
+                        "--output",
+                        str(output / "installation"),
+                    ],
+                    timeout=90,
+                )
+                run(
+                    "cleanup",
+                    ["node", str(ROOT / "frontend/scripts/e2e.mjs"), "--cleanup"],
+                    timeout=90,
+                )
             except (RuntimeError, OSError) as error:
                 summary.update(status="failed", cleanupError=str(error))
                 return_code = return_code or 1
@@ -213,21 +606,16 @@ def main():
                 elif (source / "cleanup.json").exists():
                     (output / "e2e").mkdir()
                     shutil.copy2(source / "cleanup.json", output / "e2e/cleanup.json")
-            implementation = []
-            for name in ("Dockerfile", ".dockerignore", "compose.app.yaml"):
-                path = ROOT / name
-                implementation.append(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + name)
-            for directory in ("backend", "frontend", "scripts", ".github"):
-                for parent, dirs, files in os.walk(ROOT / directory):
-                    dirs[:] = sorted(d for d in dirs if d not in ("target", "node_modules", "dist", "test-results", "playwright-report", "__pycache__"))
-                    for name in sorted(files):
-                        path = Path(parent) / name
-                        if name.startswith(".env"):
-                            continue
-                        implementation.append(hashlib.sha256(path.read_bytes()).hexdigest() + "  " + str(path.relative_to(ROOT)))
-            manifest = "\n".join(sorted(implementation)) + "\n"
+            try:
+                manifest = delivery.hashes()
+            except (RuntimeError, OSError, ValueError) as error:
+                summary.update(status="failed", manifestError=str(error))
+                return_code = return_code or 1
+                manifest = ""
             (output / "implementation.sha256").write_text(manifest)
-            summary["implementationSha256"] = hashlib.sha256(manifest.encode()).hexdigest()
+            summary["implementationSha256"] = hashlib.sha256(
+                manifest.encode()
+            ).hexdigest()
             save()
             print(f"Gate: {summary['status']}. Evidências: {output}", flush=True)
         return return_code

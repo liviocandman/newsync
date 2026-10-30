@@ -1,6 +1,7 @@
 package br.com.agregador;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import java.net.URI;
 import java.net.http.HttpClient;

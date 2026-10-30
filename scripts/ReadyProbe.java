@@ -1,7 +1,7 @@
 import java.net.HttpURLConnection;
 import java.net.URI;
 
-/** Probe presente no JRE distribuído; não imprime corpo, cookies ou configuração. */
+/** Probe included in the distributed JRE; never prints bodies, cookies, or configuration. */
 public final class ReadyProbe {
   public static void main(String[] args) {
     try {

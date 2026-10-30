@@ -1,11 +1,12 @@
 package br.com.agregador.auth;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import java.sql.SQLException;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.*;
-import org.springframework.transaction.*;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.TransactionSystemException;
 
 class DatabaseFailuresTest {
   @Test

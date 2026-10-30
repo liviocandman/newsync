@@ -1,25 +1,61 @@
 package br.com.agregador;
 
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.isNull;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
-import br.com.agregador.ingestion.*;
-import br.com.agregador.sources.*;
-import java.net.*;
-import java.net.http.*;
+import br.com.agregador.ingestion.CollectionWriter;
+import br.com.agregador.ingestion.FeedParser;
+import br.com.agregador.ingestion.FeedTransportException;
+import br.com.agregador.ingestion.ManualFeedDispatcher;
+import br.com.agregador.ingestion.PublicFeedClient;
+import br.com.agregador.sources.CollectionActivity;
+import br.com.agregador.sources.SourceRepository;
+import br.com.agregador.sources.SourceService;
+import java.net.CookieManager;
+import java.net.CookiePolicy;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.*;
-import java.util.*;
-import java.util.concurrent.*;
-import org.junit.jupiter.api.*;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.*;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import tools.jackson.databind.*;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -610,7 +646,7 @@ class SourceHttpIT {
         assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
         assertThat(service.refresh(a).status()).isEqualTo("collecting");
         assertThat(sources.find(a).manualRequestedAt()).isNull();
-        assertThat(sources.view(sources.find(a)).collecting()).isTrue();
+        assertThat(service.detail(a).collecting()).isTrue();
         when(clock.instant()).thenReturn(time.plusSeconds(2));
         assertThat(service.refresh(b).status()).isEqualTo("scheduled");
         dispatcher.tick();
@@ -626,7 +662,7 @@ class SourceHttpIT {
     assertThat(sources.find(c).lastResult()).isEqualTo("never");
     dispatcher.tick();
     assertThat(sources.find(c).lastResult()).isEqualTo("success");
-    assertThat(sources.view(sources.find(a)).collecting()).isFalse();
+    assertThat(service.detail(a).collecting()).isFalse();
   }
 
   @Test

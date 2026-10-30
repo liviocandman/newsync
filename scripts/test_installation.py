@@ -1,4 +1,5 @@
-"""Contratos de recuperação que não precisam de Docker; T-19 cobre o percurso real."""
+"""Recovery contracts that do not require Docker; T-19 covers the actual workflow."""
+
 import json
 import unittest
 from pathlib import Path
@@ -12,16 +13,27 @@ class ContainerIdentityTest(unittest.TestCase):
         self.db = object.__new__(backup.Database)
         self.db.database, self.db.user = "news_personal", "news_personal"
         self.project = {"com.docker.compose.project": "isolated"}
-        self.db.info = {"Config": {"Labels": {**self.project, "com.docker.compose.service": "db"},
-                                   "Env": ["POSTGRES_USER=news_personal"]},
-                        "NetworkSettings": {"Networks": {"own": {"Aliases": ["db"]}}}}
+        self.db.info = {
+            "Config": {
+                "Labels": {**self.project, "com.docker.compose.service": "db"},
+                "Env": ["POSTGRES_USER=news_personal"],
+            },
+            "NetworkSettings": {"Networks": {"own": {"Aliases": ["db"]}}},
+        }
         self.app_id = "a" * 64
-        self.app = {"Id": self.app_id, "State": {"Status": "exited", "Running": False},
-                    "Image": "sha256:" + "b" * 64,
-                    "Config": {"Labels": {**self.project, "com.docker.compose.service": "app"},
-                               "Env": ["JDBC_URL=jdbc:postgresql://db:5432/news_personal",
-                                       "JDBC_USERNAME=news_personal"]},
-                    "NetworkSettings": {"Networks": {"own": {}}}}
+        self.app = {
+            "Id": self.app_id,
+            "State": {"Status": "exited", "Running": False},
+            "Image": "sha256:" + "b" * 64,
+            "Config": {
+                "Labels": {**self.project, "com.docker.compose.service": "app"},
+                "Env": [
+                    "JDBC_URL=jdbc:postgresql://db:5432/news_personal",
+                    "JDBC_USERNAME=news_personal",
+                ],
+            },
+            "NetworkSettings": {"Networks": {"own": {}}},
+        }
 
     def inspect_rejected(self, pattern):
         with patch.object(backup, "run", return_value=json.dumps([self.app]).encode()):

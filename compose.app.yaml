@@ -10,14 +10,14 @@ services:
       APP_BASE_URL: http://127.0.0.1:${NEWS_APP_PORT:-8080}
       APP_COLLECTION_ENABLED: ${NEWS_COLLECTION_ENABLED:-false}
     ports:
-      - "127.0.0.1:${NEWS_APP_PORT:-8080}:8080"
+      - '127.0.0.1:${NEWS_APP_PORT:-8080}:8080'
     secrets:
       - source: db_password
         target: spring.datasource.password
     depends_on:
       db:
         condition: service_healthy
-    restart: "no"
+    restart: 'no'
     stop_grace_period: 45s
     read_only: true
     tmpfs:
@@ -35,11 +35,11 @@ services:
     volumes:
       - app_pg18:/var/lib/postgresql
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U news_personal -d news_personal"]
+      test: [CMD-SHELL, 'pg_isready -U news_personal -d news_personal']
       interval: 2s
       timeout: 3s
       retries: 30
-    restart: "no"
+    restart: 'no'
 secrets:
   db_password:
     file: ${NEWS_DB_SECRET_FILE:?Informe arquivo privado fora do checkout}

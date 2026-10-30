@@ -96,7 +96,7 @@ test('abrir → marcar → recarregar → reiniciar preserva estados e bloqueia 
   const articleUrl = page.url();
   await backend.stop();
   await backend.start();
-  // A página ainda possui o token e cookie anteriores ao restart.
+  // The page still holds the token and cookie from before the restart.
   await page.getByRole('button', { name: 'Remover dos salvos' }).click();
   await expect(
     page.getByRole('button', { name: 'Salvar artigo', exact: true }),

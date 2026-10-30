@@ -37,7 +37,7 @@ test('normal vazio → fonte pendente → leitura → restart recupera CSRF uma 
       'SELECT count(*) FROM sources WHERE manual_requested_at IS NOT NULL OR last_attempt_at IS NOT NULL',
     ),
   ).toBe('0');
-  // A infraestrutura prepara dados diretamente no PostgreSQL de teste, sem seed no perfil normal.
+  // Infrastructure prepares data directly in the test PostgreSQL instance, without seeding the normal profile.
   backend.sql(`INSERT INTO articles(id,source_id,dedup_key,external_id,title,content_html,content_text,sort_at,first_seen_at,last_seen_at,updated_at,original_url)
     SELECT '${articleId}',id,'id:browser-test','browser-test','Leitura local de teste','<p>Texto seguro recebido do feed.</p>','Texto seguro recebido do feed.',now(),now(),now(),now(),'https://example.invalid/original' FROM sources;
     INSERT INTO articles(id,source_id,dedup_key,external_id,title,sort_at,first_seen_at,last_seen_at,updated_at)
@@ -71,7 +71,7 @@ test('normal vazio → fonte pendente → leitura → restart recupera CSRF uma 
       `SELECT id || '|' || read_at || '|' || saved_at FROM articles WHERE id='${articleId}'`,
     ),
   ).toBe(before);
-  // Captura somente método/status/código; não guarda tokens, cookies ou headers.
+  // Capture only method, status, and code; never store tokens, cookies, or headers.
   const sequence: string[] = [];
   const responseTasks: Promise<void>[] = [];
   const record = (response: Response) => {

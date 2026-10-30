@@ -1,28 +1,60 @@
 package br.com.agregador;
 
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
-import br.com.agregador.ingestion.*;
-import br.com.agregador.sources.*;
-import java.io.*;
-import java.net.*;
-import java.net.http.*;
+import br.com.agregador.ingestion.CollectionWriter;
+import br.com.agregador.ingestion.FeedImporter;
+import br.com.agregador.ingestion.FeedParser;
+import br.com.agregador.ingestion.ManualFeedDispatcher;
+import br.com.agregador.ingestion.PublicFeedClient;
+import br.com.agregador.sources.CollectionActivity;
+import br.com.agregador.sources.SourceRepository;
+import br.com.agregador.sources.SourceService;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.net.CookieManager;
+import java.net.CookiePolicy;
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
-import java.time.*;
-import java.util.*;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.testcontainers.postgresql.PostgreSQLContainer;
-import tools.jackson.databind.*;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
-/** T-20: subprocessos reais, somente acervo sintético e recursos próprios. */
+/** T-20: actual subprocesses, synthetic archive data and isolated resources only. */
 class BackupRestoreIT {
   static final Path ROOT = Path.of("..").toAbsolutePath().normalize();
   static final Path JAR = ROOT.resolve("backend/target/news.jar");
@@ -155,7 +187,7 @@ class BackupRestoreIT {
           try {
             if (http(client, port, "GET", "/health/ready", null, null).statusCode() == 200) return;
           } catch (IOException ignored) {
-            // Processo ainda inicializando.
+            // The process is still starting.
           }
           Thread.sleep(100);
         }
@@ -446,7 +478,7 @@ class BackupRestoreIT {
           assertThat(state.get("collecting").asBoolean()).isFalse();
           assertThat(state.get("collectionEnabled").asBoolean()).isFalse();
         }
-        Thread.sleep(1200); // Pelo menos um ciclo real com coleta desligada.
+        Thread.sleep(1200); // Allow at least one real cycle with collection disabled.
         assertThat(rows("destination")).isEqualTo(before);
         var absent =
             JSON.readTree(

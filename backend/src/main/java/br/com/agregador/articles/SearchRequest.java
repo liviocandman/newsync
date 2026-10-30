@@ -1,9 +1,11 @@
 package br.com.agregador.articles;
 
 import br.com.agregador.auth.HttpParameters.UnsupportedParameters;
-import java.time.*;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
-import java.util.*;
+import java.util.Set;
+import java.util.UUID;
 import org.springframework.util.MultiValueMap;
 
 public record SearchRequest(

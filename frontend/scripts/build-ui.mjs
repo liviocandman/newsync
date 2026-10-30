@@ -8,7 +8,7 @@ if (!['normal', 'demo'].includes(mode) || !target)
   throw new Error('Build exige modo normal/demo e diretório Maven explícitos.');
 const frontend = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(target, 'generated-resources', 'web-ui');
-// Alternar perfis sem clean também elimina fixture/UI antigas no classpath.
+// Switching profiles without clean also removes stale fixtures and UI from the classpath.
 for (const directory of [
   output,
   resolve(target, 'classes/web-ui'),

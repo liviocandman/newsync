@@ -1,5 +1,5 @@
 {
-  "name": "news-b00",
+  "name": "caderno",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,8 +12,10 @@
     "test": "vitest run",
     "build": "vite build",
     "test:e2e": "node scripts/e2e.mjs",
-    "format": "prettier . --write",
-    "format:check": "prettier . --check"
+    "format": "npm --prefix ../tools/quality run format",
+    "format:check": "npm --prefix ../tools/quality run format:check",
+    "test:coverage": "vitest run --coverage",
+    "lint": "npm --prefix ../tools/quality run lint"
   },
   "dependencies": {
     "@tanstack/react-query": "5.105.0",
@@ -34,6 +36,7 @@
     "typescript": "7.0.2",
     "vite": "8.3.5",
     "vitest": "5.0.5",
-    "prettier": "3.9.10"
+    "prettier": "3.9.10",
+    "@vitest/coverage-v8": "5.0.5"
   }
 }

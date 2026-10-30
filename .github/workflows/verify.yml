@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   verify:
-    name: F-02 / verify
+    name: F-03 / verify
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -30,7 +30,9 @@ jobs:
         with:
           node-version: '24.22.1'
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            tools/quality/package-lock.json
       - name: Preparar Chromium e bibliotecas do runner
         working-directory: frontend
         run: |
@@ -44,7 +46,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: ${{ always() && steps.checkout.outcome == 'success' }}
         with:
-          name: f02-${{ github.run_id }}-${{ github.run_attempt }}
+          name: f03-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/*/
           if-no-files-found: error
           retention-days: 14

@@ -1,5 +1,5 @@
-// Aceite manual sobre feeds reais, separado das regressões determinísticas do gate.
-// Requer o JAR normal e SHA-256 produzidos por ./scripts/verify.
+// Manual acceptance using real feeds, separate from deterministic gate regressions.
+// Requires the normal JAR and SHA-256 produced by ./scripts/verify.
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { TestBackend } from '../e2e/support/backend.ts';
 import type { Source, Summary, SearchPage } from '../src/api.ts';
 
-// Mesmo isolamento de configuração do supervisor E2E; nunca herdar JDBC/Spring pessoais.
+// Use the E2E supervisor configuration isolation; never inherit personal JDBC or Spring settings.
 for (const key of Object.keys(process.env)) {
   if (
     !/^(PATH|HOME|USER|JAVA_HOME|TMPDIR|CI|LANG|LC_.*|LD_LIBRARY_PATH|PLAYWRIGHT_.*|DOCKER_.*|NODE_EXTRA_CA_CERTS|npm_config_cache|NEWS_NORMAL_JAR|NEWS_NORMAL_SHA256)$/.test(
@@ -140,7 +140,7 @@ try {
     throw new Error(
       'Menos de dez artigos reais disponíveis; qualidade de uso permanece pendente.',
     );
-  // Distribuir entre fontes quando possível; cada expectativa vem de um título já persistido.
+  // Distribute across sources when possible; each expectation comes from a persisted title.
   const selected: Summary[] = [];
   for (let position = 0; selected.length < 10; position++) {
     for (const source of sources) {

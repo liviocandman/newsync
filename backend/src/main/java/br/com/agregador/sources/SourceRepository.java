@@ -1,11 +1,11 @@
 package br.com.agregador.sources;
 
-import br.com.agregador.ingestion.CollectionSchedule;
 import java.sql.Types;
 import java.time.OffsetDateTime;
-import java.util.*;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.env.Environment;
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Optional;
+import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -13,43 +13,9 @@ import org.springframework.stereotype.Repository;
 public class SourceRepository {
   private final JdbcClient jdbc;
 
-  private final CollectionSchedule schedule;
-  private final CollectionActivity activity;
-  private final boolean enabled;
-
-  public SourceRepository(
-      JdbcClient jdbc,
-      CollectionSchedule schedule,
-      CollectionActivity activity,
-      Environment environment,
-      @Value("${app.collection.enabled:true}") boolean enabled) {
+  public SourceRepository(JdbcClient jdbc) {
     this.jdbc = jdbc;
-    this.schedule = schedule;
-    this.activity = activity;
-    this.enabled = enabled && !environment.matchesProfiles("demo");
   }
-
-  public Source view(Row row) {
-    return row.view(activity.matches(row.id(), row.lifecycleVersion()), enabled);
-  }
-
-  public record Diagnostic(String code, String message, int ignoredItems) {}
-
-  public record Source(
-      UUID id,
-      String feedUrl,
-      String title,
-      String state,
-      String lastResult,
-      OffsetDateTime lastSuccessAt,
-      OffsetDateTime lastAttemptAt,
-      OffsetDateTime manualRequestedAt,
-      OffsetDateTime retryAfterAt,
-      Diagnostic diagnostic,
-      OffsetDateTime nextPollAt,
-      int consecutiveFailures,
-      boolean collecting,
-      boolean collectionEnabled) {}
 
   public record Row(
       UUID id,
@@ -69,27 +35,7 @@ public class SourceRepository {
       String diagnosticMessage,
       int ignoredItems,
       OffsetDateTime nextPollAt,
-      int consecutiveFailures) {
-    public Source view(boolean collecting, boolean enabled) {
-      return new Source(
-          id,
-          feedUrl,
-          title,
-          status,
-          lastResult,
-          lastSuccessAt,
-          lastAttemptAt,
-          manualRequestedAt,
-          retryAfterAt,
-          diagnosticCode == null
-              ? null
-              : new Diagnostic(diagnosticCode, diagnosticMessage, ignoredItems),
-          nextPollAt,
-          consecutiveFailures,
-          collecting,
-          enabled);
-    }
-  }
+      int consecutiveFailures) {}
 
   private static final String COLUMNS =
       "id,feed_url,title,status,lifecycle_version,last_result,last_success_at,last_attempt_at,manual_requested_at,last_manual_refresh_at,retry_after_at,etag,last_modified,diagnostic_code,diagnostic_message,ignored_items,next_poll_at,consecutive_failures";
@@ -130,14 +76,10 @@ public class SourceRepository {
     return id;
   }
 
-  public List<Source> list() {
-    return jdbc
-        .sql("SELECT " + COLUMNS + " FROM sources ORDER BY created_at,id")
+  public List<Row> list() {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM sources ORDER BY created_at,id")
         .query(Row.class)
-        .list()
-        .stream()
-        .map(this::view)
-        .toList();
+        .list();
   }
 
   public Row find(UUID id) {
@@ -232,7 +174,8 @@ public class SourceRepository {
       String code,
       String message,
       int ignored,
-      OffsetDateTime now) {
+      OffsetDateTime now,
+      OffsetDateTime nextPollAt) {
     boolean full = result.equals("success") || result.equals("not_modified");
     jdbc.sql(
             """
@@ -250,7 +193,7 @@ public class SourceRepository {
         .param("captured", captured.manualRequestedAt(), Types.TIMESTAMP_WITH_TIMEZONE)
         .param("result", result)
         .param("now", now)
-        .param("next", schedule.next(now, result, captured.consecutiveFailures(), retryAfter))
+        .param("next", nextPollAt)
         .param("full", full)
         .param("failed", result.equals("failed"))
         .param("replaceValidators", result.equals("success"))

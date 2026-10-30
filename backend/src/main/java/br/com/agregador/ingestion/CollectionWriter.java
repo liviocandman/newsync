@@ -1,7 +1,8 @@
 package br.com.agregador.ingestion;
 
 import br.com.agregador.sources.SourceRepository;
-import java.time.*;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.function.Consumer;
 import org.springframework.stereotype.Service;

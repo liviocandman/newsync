@@ -22,7 +22,7 @@ try {
             (node) =>
               new URL(
                 node.getAttribute('src') ?? node.getAttribute('href'),
-                location.href,
+                globalThis.location.href,
               ).pathname,
           )
           .sort(),
@@ -55,8 +55,9 @@ try {
   if (
     (await page
       .locator('body')
-      .evaluate((element) => getComputedStyle(element).backgroundColor)) !==
-      'rgb(247, 246, 242)' ||
+      .evaluate(
+        (element) => globalThis.getComputedStyle(element).backgroundColor,
+      )) !== 'rgb(247, 246, 242)' ||
     errors.length
   )
     throw new Error('CSS/JavaScript/CSP falhou depois da troca de build.');

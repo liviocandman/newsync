@@ -14,7 +14,7 @@ public class FeedImporter {
     this.writer = writer;
   }
 
-  // Parsing fora da transação; a confirmação passa pelo proxy de outra bean.
+  // Parse outside the transaction; confirmation goes through another bean proxy.
   public void importFeed(UUID sourceId, long version, InputStream input) {
     var feed = parser.parse(input);
     writer.confirm(sourceId, version, feed);

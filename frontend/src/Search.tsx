@@ -1,3 +1,4 @@
+import { Reader } from './reader/Reader';
 import { useQuery } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -220,5 +221,15 @@ export function SearchResults() {
         </>
       )}
     </section>
+  );
+}
+
+export function SearchScreen() {
+  const [params] = useSearchParams();
+  return (
+    <>
+      <Link to={`/search?${params}`}>Voltar à busca</Link>
+      <Reader />
+    </>
   );
 }

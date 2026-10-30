@@ -1,0 +1,22 @@
+**/node_modules/
+**/target/
+**/dist/
+**/coverage/
+**/test-results/
+**/playwright-report/
+artifacts/
+**/package-lock.json
+# Immutable historical evidence and byte-sensitive feed/migration fixtures.
+docs/evidencias/B-*
+docs/evidencias/F-01*
+docs/evidencias/F-02*
+docs/evidencias/revisao-fundacao.md
+docs/historico/
+docs/patches/*.patch
+backend/src/test/resources/
+backend/src/demo/resources/
+backend/src/main/resources/db/migration/
+# Third-party Maven Wrapper: preserve its original bytes and executable modes.
+backend/mvnw
+backend/mvnw.cmd
+backend/.mvn/

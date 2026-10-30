@@ -419,7 +419,7 @@ it('busca só no envio e reinicia offset ao alterar termos fonte e período', as
   await userEvent.clear(screen.getByLabelText('Termos da busca'));
   await userEvent.type(screen.getByLabelText('Termos da busca'), 'Java CSRF');
   await userEvent.selectOptions(screen.getByLabelText('Fonte da busca'), 's');
-  // Disparar change representa o valor completo de um controle datetime-local.
+  // Dispatching change represents the complete value of a datetime-local control.
   const { fireEvent } = await import('@testing-library/react');
   fireEvent.change(screen.getByLabelText('A partir de'), {
     target: { value: '2026-10-27T09:00' },

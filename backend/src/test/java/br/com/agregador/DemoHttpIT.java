@@ -1,19 +1,31 @@
 package br.com.agregador;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
-import br.com.agregador.ingestion.*;
-import java.net.*;
-import java.net.http.*;
+import br.com.agregador.ingestion.DemoInitializer;
+import br.com.agregador.ingestion.FeedImporter;
+import java.net.CookieManager;
+import java.net.CookiePolicy;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.*;
-import java.util.concurrent.*;
-import org.junit.jupiter.api.*;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.*;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -110,7 +122,7 @@ class DemoHttpIT {
     String id;
     String html;
     String text;
-    // Nova leitura após o retorno do proxy transacional: sanitizar só na API não passa.
+    // Read again after the transactional proxy returns: API-only sanitization must fail.
     try (var connection = dataSource.getConnection();
         var statement =
             connection.prepareStatement(

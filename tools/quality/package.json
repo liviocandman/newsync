@@ -1,0 +1,27 @@
+{
+  "name": "caderno-quality-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.15 <25"
+  },
+  "scripts": {
+    "lint": "eslint ../.. --max-warnings=0",
+    "format:check": "prettier ../.. --check --config ../../.prettierrc.json --ignore-path ../../.prettierignore",
+    "format": "prettier ../.. --write --config ../../.prettierrc.json --ignore-path ../../.prettierignore",
+    "links": "node ../../scripts/check_links.mjs"
+  },
+  "devDependencies": {
+    "eslint": "10.14.0",
+    "typescript-eslint": "8.72.1",
+    "typescript": "6.0.3",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.4.0",
+    "prettier": "3.9.10",
+    "@prettier/plugin-xml": "3.4.2",
+    "markdown-it": "15.0.3",
+    "github-slugger": "2.0.0",
+    "jscpd": "5.4.2"
+  }
+}

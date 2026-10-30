@@ -23,7 +23,7 @@ async function startChild(ignoreTermination = false): Promise<ChildProcess> {
     { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] },
   );
   children.add(child);
-  // O filho instala seu handler antes de confirmar prontidão; sem sleep de boot.
+  // The child installs its handler before confirming readiness; no startup sleep.
   await once(child, 'message');
   return child;
 }
@@ -53,7 +53,7 @@ it('cancela o prazo de A e mantém B vivo depois do prazo antigo', async () => {
   expect(first.exitCode).toBe(0);
 
   const replacement = await startChild();
-  // Aguardar este prazo é o comportamento sob teste, não coordenação de concorrência.
+  // Waiting for this deadline is the behavior under test, not concurrency coordination.
   await delay(graceMs + 100);
   expect(replacement.exitCode).toBeNull();
   expect(replacement.signalCode).toBeNull();

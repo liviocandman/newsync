@@ -15,7 +15,7 @@ export async function stopProcess(
       stopped,
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
-          // O prazo pertence a este processo, mesmo depois de um restart.
+          // The deadline belongs to this process, even after a restart.
           child.kill('SIGKILL');
           reject(new Error('Backend não encerrou.'));
         }, timeoutMs);

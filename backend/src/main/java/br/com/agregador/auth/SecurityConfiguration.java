@@ -1,14 +1,17 @@
 package br.com.agregador.auth;
 
 import br.com.agregador.web.PackagedUi;
-import jakarta.servlet.*;
-import jakarta.servlet.http.*;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.env.ConfigTreePropertySource;
-import org.springframework.context.annotation.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.Profiles;
 import org.springframework.http.HttpMethod;
@@ -41,7 +44,7 @@ public class SecurityConfiguration {
       try {
         origin = URI.create(baseUrl);
       } catch (IllegalArgumentException invalid) {
-        // A mensagem do parser de URI pode conter credenciais da configuração.
+        // The URI parser message may contain configuration credentials.
         throw new IllegalStateException("Aplicação exige endereço e origem HTTP de loopback");
       }
       if (!(container
@@ -131,7 +134,7 @@ public class SecurityConfiguration {
                                 ? PackagedUi.DOCUMENT_CSP
                                 : PackagedUi.API_CSP))
                 .referrerPolicy(ref -> ref.policy(ReferrerPolicy.NO_REFERRER)));
-    return http.build(); // CSRF ativo, sem login público ou HTTP Basic.
+    return http.build(); // CSRF stays enabled; no public login or HTTP Basic.
   }
 
   private static void requireContainerSecret(ConfigurableEnvironment env) {

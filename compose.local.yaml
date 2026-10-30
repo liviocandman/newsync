@@ -7,11 +7,11 @@ services:
       POSTGRES_USER: news_personal
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env.local}
     ports:
-      - "127.0.0.1:5434:5432"
+      - '127.0.0.1:5434:5432'
     volumes:
       - personal_pg18:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U news_personal -d news_personal"]
+      test: ['CMD-SHELL', 'pg_isready -U news_personal -d news_personal']
       interval: 2s
       timeout: 3s
       retries: 30

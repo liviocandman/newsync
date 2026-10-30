@@ -1,18 +1,23 @@
 package br.com.agregador.ingestion;
 
 import br.com.agregador.auth.DatabaseFailures;
-import br.com.agregador.sources.*;
+import br.com.agregador.sources.CollectionActivity;
+import br.com.agregador.sources.SourceRepository;
+import br.com.agregador.sources.SourceService;
 import java.io.ByteArrayInputStream;
-import java.time.*;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.annotation.*;
+import org.springframework.context.annotation.Profile;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.*;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -139,7 +144,7 @@ public class ManualFeedDispatcher {
         feed,
         captured.manualRequestedAt(),
         resolved ->
-            sources.complete(
+            service.complete(
                 captured,
                 resolved.partial() ? "partial" : "success",
                 response.etag(),

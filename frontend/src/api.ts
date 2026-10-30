@@ -84,7 +84,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
           code = error.code;
       }
     } catch {
-      /* Resposta sem JSON. */
+      /* The response has no JSON body. */
     }
     throw new ApiError(
       message,
@@ -107,7 +107,7 @@ async function write<T>(
   method: string,
   payload?: unknown,
 ): Promise<T> {
-  // Serializar uma vez mantém o mesmo comando declarativo durante a recuperação.
+  // Serialize once to retain the same declarative command throughout recovery.
   const body = payload === undefined ? undefined : JSON.stringify(payload);
   for (let attempt = 0; ; attempt++) {
     const current = await token();

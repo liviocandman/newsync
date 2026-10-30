@@ -1,8 +1,17 @@
 package br.com.agregador.sources;
 
+import br.com.agregador.ingestion.CollectionSchedule;
 import br.com.agregador.ingestion.PublicFeedUrl;
-import java.time.*;
-import java.util.*;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,11 +21,20 @@ public class SourceService {
   private final SourceRepository sources;
   private final Clock clock;
   private final CollectionActivity activity;
+  private final SourcePresentation presentation;
+  private final CollectionSchedule schedule;
 
-  public SourceService(SourceRepository sources, Clock clock, CollectionActivity activity) {
+  public SourceService(
+      SourceRepository sources,
+      Clock clock,
+      CollectionActivity activity,
+      SourcePresentation presentation,
+      CollectionSchedule schedule) {
     this.sources = sources;
     this.clock = clock;
     this.activity = activity;
+    this.presentation = presentation;
+    this.schedule = schedule;
   }
 
   public static class Rejected extends RuntimeException {
@@ -64,7 +82,7 @@ public class SourceService {
   }
 
   @Transactional(timeout = 10)
-  public SourceRepository.Source create(Map<String, Object> body) {
+  public SourcePresentation.Source create(Map<String, Object> body) {
     fields(body, Set.of("feedUrl", "title"));
     if (!(body.get("feedUrl") instanceof String raw)) throw new IllegalArgumentException();
     String url = PublicFeedUrl.normalize(raw);
@@ -72,7 +90,7 @@ public class SourceService {
         body.containsKey("title") ? title(body.get("title")) : java.net.URI.create(url).getHost();
     limits();
     try {
-      return sources.view(sources.find(sources.create(url, name, now())));
+      return presentation.view(sources.find(sources.create(url, name, now())));
     } catch (DuplicateKeyException duplicate) {
       throw new Rejected(
           409,
@@ -83,7 +101,7 @@ public class SourceService {
   }
 
   @Transactional(timeout = 10)
-  public SourceRepository.Source edit(UUID id, Map<String, Object> body) {
+  public SourcePresentation.Source edit(UUID id, Map<String, Object> body) {
     fields(body, Set.of("title", "state"));
     limits();
     var old = sources.lock(id);
@@ -97,7 +115,7 @@ public class SourceService {
     if (old.status().equals("archived") && !state.equals("active"))
       throw new Rejected(409, "SOURCE_ARCHIVED", "Reative a fonte para alterá-la.", 0);
     sources.edit(id, name, state, !state.equals(old.status()), now());
-    return sources.view(sources.find(id));
+    return presentation.view(sources.find(id));
   }
 
   @Transactional(timeout = 10)
@@ -105,6 +123,37 @@ public class SourceService {
     limits();
     var old = sources.lock(id);
     sources.edit(id, old.title(), "archived", !old.status().equals("archived"), now());
+  }
+
+  public List<SourcePresentation.Source> list() {
+    return sources.list().stream().map(presentation::view).toList();
+  }
+
+  public SourcePresentation.Source detail(UUID id) {
+    return presentation.view(sources.find(id));
+  }
+
+  public void complete(
+      SourceRepository.Row captured,
+      String result,
+      String etag,
+      String modified,
+      OffsetDateTime retryAfter,
+      String code,
+      String message,
+      int ignored,
+      OffsetDateTime now) {
+    sources.complete(
+        captured,
+        result,
+        etag,
+        modified,
+        retryAfter,
+        code,
+        message,
+        ignored,
+        now,
+        schedule.next(now, result, captured.consecutiveFailures(), retryAfter));
   }
 
   public record Refresh(String status) {}
@@ -162,7 +211,7 @@ public class SourceService {
     limits();
     var row = sources.lock(captured.id());
     if (!current(row, captured)) return false;
-    sources.complete(
+    complete(
         captured,
         result,
         etag,

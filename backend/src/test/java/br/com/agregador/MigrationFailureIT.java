@@ -1,6 +1,7 @@
 package br.com.agregador;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.DriverManager;
 import java.util.concurrent.atomic.AtomicBoolean;

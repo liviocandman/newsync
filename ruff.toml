@@ -1,0 +1,9 @@
+target-version = "py311"
+extend-include = ["scripts/verify"]
+extend-exclude = ["artifacts", "docs/evidencias", "docs/historico", "node_modules", "target"]
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+
+[format]
+line-ending = "lf"

@@ -20,7 +20,7 @@ public class DemoInitializer implements ApplicationRunner {
 
   @Override
   public void run(ApplicationArguments args) throws Exception {
-    // Associação fixa. URL de metadados nunca é resolvida/conectada.
+    // Fixed association. Never resolve or connect to the metadata URL.
     var id = sources.register("https://example.invalid/b00/feed.xml", "Caderno de demonstração");
     try (var input = new ClassPathResource("demo/feed.xml").getInputStream()) {
       importer.importFeed(id, 0, input);

@@ -1,0 +1,18 @@
+* text=auto eol=lf
+backend/mvnw.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
+*.jar binary
+*.zip binary
+*.gz binary
+*.patch -text
+# Preserve immutable historical checksums and byte-sensitive fixtures in every checkout.
+docs/evidencias/** -text
+docs/historico/** -text
+backend/src/test/resources/** -text
+backend/src/demo/resources/** -text
+backend/src/main/resources/db/migration/V001__controlled_feed.sql -text
+backend/src/main/resources/db/migration/V002__local_reader_and_manual_ingestion.sql -text
+backend/src/main/resources/db/migration/V003__archive_search.sql -text

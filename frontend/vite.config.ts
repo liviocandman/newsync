@@ -58,6 +58,13 @@ export default defineConfig(({ command, mode }) => ({
   },
   test: {
     environment: 'jsdom',
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/test-setup.ts', 'src/main.tsx'],
+      reporter: ['json', 'json-summary', 'lcov', 'html'],
+      reportsDirectory: process.env.NEWS_COVERAGE_DIR ?? 'coverage',
+    },
     setupFiles: ['./src/test-setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/**/*.test.ts'],
   },

@@ -1,33 +1,34 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8" ?>
 <FindBugsFilter>
   <!-- These exact constructors receive shared Spring beans. Copying them would break the single
        DataSource/transaction proxy and activity guard. This does not suppress DTO collection leaks. -->
   <Match>
     <Or>
-      <Class name="br.com.agregador.articles.ArticleController"/>
-      <Class name="br.com.agregador.articles.SearchController"/>
-      <Class name="br.com.agregador.articles.ArticleService"/>
-      <Class name="br.com.agregador.ingestion.CollectionWriter"/>
-      <Class name="br.com.agregador.ingestion.DemoInitializer"/>
-      <Class name="br.com.agregador.ingestion.ManualFeedDispatcher"/>
-      <Class name="br.com.agregador.sources.SourceController"/>
-      <Class name="br.com.agregador.sources.SourceRepository"/>
-      <Class name="br.com.agregador.sources.SourceService"/>
+      <Class name="br.com.agregador.articles.ArticleController" />
+      <Class name="br.com.agregador.articles.SearchController" />
+      <Class name="br.com.agregador.articles.ArticleService" />
+      <Class name="br.com.agregador.ingestion.CollectionWriter" />
+      <Class name="br.com.agregador.ingestion.DemoInitializer" />
+      <Class name="br.com.agregador.ingestion.ManualFeedDispatcher" />
+      <Class name="br.com.agregador.sources.SourceController" />
+      <Class name="br.com.agregador.sources.SourceRepository" />
+      <Class name="br.com.agregador.sources.SourcePresentation" />
+      <Class name="br.com.agregador.sources.SourceService" />
     </Or>
-    <Method name="&lt;init&gt;"/>
-    <Bug pattern="EI_EXPOSE_REP2"/>
+    <Method name="&lt;init&gt;" />
+    <Bug pattern="EI_EXPOSE_REP2" />
   </Match>
   <!-- Null represents an absent filter, independently of read=false/saved=false. -->
   <Match>
-    <Class name="br.com.agregador.articles.ArticlePagination"/>
-    <Method name="bool"/>
-    <Bug pattern="NP_BOOLEAN_RETURN_NULL"/>
+    <Class name="br.com.agregador.articles.ArticlePagination" />
+    <Method name="bool" />
+    <Bug pattern="NP_BOOLEAN_RETURN_NULL" />
   </Match>
   <!-- Filter error bodies are JSON with fixed server-owned messages and a generated UUID.
        application/json + Security's nosniff makes this a JSON sink, never an HTML sink. -->
   <Match>
-    <Class name="br.com.agregador.auth.ApiErrors"/>
-    <Method name="write"/>
-    <Bug pattern="XSS_SERVLET"/>
+    <Class name="br.com.agregador.auth.ApiErrors" />
+    <Method name="write" />
+    <Bug pattern="XSS_SERVLET" />
   </Match>
 </FindBugsFilter>

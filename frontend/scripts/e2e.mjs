@@ -185,7 +185,7 @@ if (process.argv.includes('--cleanup')) {
               )
                 break;
             } catch {
-              /* Esperar o processo próprio. */
+              /* Wait for the process owned by this run. */
             }
             await delay(100);
           }

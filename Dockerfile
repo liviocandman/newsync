@@ -1,4 +1,4 @@
-# Builds de referência: Linux amd64. Digests consultados no registry em 29/10/2026.
+# Reference builds: Linux amd64. Registry digests checked on 2026-10-29.
 FROM scratch AS build-context
 COPY . /
 
@@ -8,14 +8,15 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 WORKDIR /build
+COPY config config
 COPY backend backend
 COPY frontend frontend
 RUN cd backend && sh mvnw -B -DskipTests clean package
 FROM scratch AS artifact
 COPY --from=source-build /build/backend/target/news.jar /news.jar
 
-# O runtime recebe EXCLUSIVAMENTE o JAR aprovado, por contexto nomeado obrigatório.
-# BuildKit não recompila source-build ao construir este target.
+# The runtime receives ONLY the approved JAR through a required named context.
+# BuildKit does not recompile source-build when building this target.
 FROM eclipse-temurin:25.0.5_8-jdk-noble@sha256:0939ed943f8107b943b6a6ac2e21d24568c24e4443d496e4d8b8e8da1ccdde1c AS probe-build
 WORKDIR /probe
 COPY scripts/ReadyProbe.java .

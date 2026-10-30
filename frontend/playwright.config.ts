@@ -21,7 +21,7 @@ export default defineConfig({
       ? 'http://127.0.0.1:18080'
       : 'http://127.0.0.1:5174',
     viewport: { width: 1280, height: 900 },
-    // Traces de rede incluiriam cookies e respostas CSRF. Guardar relatório/captura.
+    // Network traces would include cookies and CSRF responses. Keep only reports and screenshots.
     trace: 'off',
   },
 });

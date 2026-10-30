@@ -9,6 +9,10 @@ backend/.mvn/*
 !backend/.mvn/wrapper/
 backend/.mvn/wrapper/*
 !backend/.mvn/wrapper/maven-wrapper.properties
+!config/
+config/*
+!config/checkstyle.xml
+!config/checkstyle-metrics.xml
 !backend/spotbugs-exclude.xml
 !backend/src/
 backend/src/*

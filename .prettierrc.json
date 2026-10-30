@@ -1,0 +1,8 @@
+{
+  "singleQuote": true,
+  "endOfLine": "lf",
+  "plugins": [
+    "./tools/quality/node_modules/@prettier/plugin-xml/src/plugin.js"
+  ],
+  "xmlWhitespaceSensitivity": "ignore"
+}
