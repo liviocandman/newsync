@@ -1,6 +1,7 @@
 package br.com.agregador.ingestion;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 
 import br.com.agregador.sources.CollectionActivity;
 import br.com.agregador.sources.SourceRepository;
@@ -14,6 +15,7 @@ import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.UUID;
@@ -32,6 +34,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 @SpringBootTest(properties = "app.collection.enabled=false")
@@ -57,10 +60,14 @@ class AutomaticCollectionIT {
   @Autowired CollectionWriter writer;
   @Autowired FeedParser parser;
   @Autowired JdbcClient jdbc;
+  @MockitoBean Clock clock;
 
   @Test
   void realHttpAutomaticCollectionCommitsConditionalResultsRetryAfterAndPersonalStates()
       throws Exception {
+    var now = Instant.parse("2026-10-31T12:00:00Z");
+    when(clock.instant()).thenReturn(now);
+    when(clock.getZone()).thenReturn(ZoneOffset.UTC);
     var requests = new AtomicInteger();
     var status = new AtomicInteger(200);
     var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
@@ -93,8 +100,7 @@ class AutomaticCollectionIT {
     try {
       UUID id = service.create(Map.of("feedUrl", "http://feed.example/feed")).id();
       assertThat(requests.get()).isZero();
-      var now = sources.find(id).nextPollAt().toInstant().plusSeconds(1);
-      Clock clock = Clock.fixed(now, ZoneOffset.UTC);
+      assertThat(sources.find(id).nextPollAt().toInstant()).isEqualTo(now);
       PublicFeedClient transport =
           new PublicFeedClient(
               host -> new InetAddress[] {InetAddress.getByName("93.184.216.34")},
@@ -144,7 +150,10 @@ class AutomaticCollectionIT {
               sources, service, activity, transport, parser, writer, clock, true);
       dispatcher.ready();
       dispatcher.tick();
+      assertThat(requests.get()).isEqualTo(1);
       assertThat(sources.find(id).lastResult()).isEqualTo("success");
+      assertThat(sources.find(id).lastAttemptAt().toInstant()).isEqualTo(now);
+      assertThat(sources.find(id).lastSuccessAt().toInstant()).isEqualTo(now);
       assertThat(sources.find(id).manualRequestedAt()).isNull();
       jdbc.sql("UPDATE articles SET read_at=now(),saved_at=now()").update();
       var identity = jdbc.sql("SELECT id,read_at,saved_at FROM articles").query().listOfRows();
@@ -155,6 +164,7 @@ class AutomaticCollectionIT {
           .param("at", now.atOffset(ZoneOffset.UTC))
           .update();
       dispatcher.tick();
+      assertThat(requests.get()).isEqualTo(2);
       assertThat(sources.find(id).lastResult()).isEqualTo("not_modified");
       assertThat(sources.find(id).etag()).isEqualTo("\"v1\"");
       status.set(503);
@@ -162,6 +172,7 @@ class AutomaticCollectionIT {
           .param("at", now.atOffset(ZoneOffset.UTC))
           .update();
       dispatcher.tick();
+      assertThat(requests.get()).isEqualTo(3);
       var failed = sources.find(id);
       assertThat(failed.lastResult()).isEqualTo("failed");
       assertThat(failed.consecutiveFailures()).isEqualTo(1);
