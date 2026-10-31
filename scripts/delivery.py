@@ -28,7 +28,9 @@ GENERATED = {
 def discover(root):
     """Find maintained paths without entering private/configuration or output trees."""
     result = set()
-    managed = {"backend", "frontend", "scripts", "tools", "config", ".github", "docs"}
+    # The repository intentionally keeps planning/evidence in ignored local docs/.
+    # Public operational documentation lives in tracked root/scripts files.
+    managed = {"backend", "frontend", "scripts", "tools", "config", ".github"}
     excluded = GENERATED | {
         ".agents",
         ".codex",

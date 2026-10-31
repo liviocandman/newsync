@@ -1,23 +1,34 @@
-name: Fundação
+name: Verify
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Verification scope
+        type: choice
+        options: [ci, full]
+        default: ci
 
 permissions:
   contents: read
 
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
-    name: F-03 / verify
+    name: Verify
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       NEWS_E2E_RUN_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      NEWS_VERIFY_MODE: ${{ inputs.mode || 'ci' }}
     steps:
       - uses: actions/checkout@v7
-        id: checkout
         with:
           persist-credentials: false
       - uses: actions/setup-java@v6
@@ -33,20 +44,32 @@ jobs:
           cache-dependency-path: |
             frontend/package-lock.json
             tools/quality/package-lock.json
-      - name: Preparar Chromium e bibliotecas do runner
-        working-directory: frontend
-        run: |
-          npm ci --no-audit --no-fund
-          npm exec -- playwright install --with-deps chromium
-      - name: Executar o mesmo gate local
-        run: python3 scripts/verify
-      - name: Confirmar limpeza dos recursos desta execução
-        if: ${{ always() && steps.checkout.outcome == 'success' }}
-        run: node frontend/scripts/e2e.mjs --cleanup
-      - uses: actions/upload-artifact@v7
-        if: ${{ always() && steps.checkout.outcome == 'success' }}
+      - uses: actions/setup-python@v6
         with:
-          name: f03-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/*/
-          if-no-files-found: error
+          python-version: '3.12'
+      - name: Prepare daily audit cache
+        id: cache-day
+        run: |
+          echo "NEWS_TOOLS_DIR=$RUNNER_TEMP/news-quality-tools" >> "$GITHUB_ENV"
+          echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.NEWS_TOOLS_DIR }}/*.whl
+            ${{ env.NEWS_TOOLS_DIR }}/*.tar.gz
+            ${{ env.NEWS_TOOLS_DIR }}/trivy-db
+          key: quality-${{ runner.os }}-${{ hashFiles('config/tools.json') }}-${{ steps.cache-day.outputs.day }}
+          restore-keys: quality-${{ runner.os }}-${{ hashFiles('config/tools.json') }}-
+      - name: Run verification
+        run: python3 scripts/verify --mode "$NEWS_VERIFY_MODE" --prepare-browser
+      - name: Upload verification reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: verify-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/*/
+            !artifacts/*/source-snapshot/**
+            !artifacts/**/*.exec
+          if-no-files-found: warn
           retention-days: 14

@@ -46,18 +46,20 @@ For the synthetic demonstration: copy `.env.example` to `.env`, start `docker co
 
 ## Verify and contribute
 
-Prepare Chromium system libraries once with `cd frontend && npm ci && npm exec -- playwright install --with-deps chromium`. Then, from the root:
+Prepare Chromium system libraries once with `cd frontend && npm ci && npm exec -- playwright install --with-deps chromium`. Then, from the root, run the essential CI checks:
 
 ```bash
-python3 scripts/verify
+python3 scripts/verify --mode ci
 ```
 
-The gate runs read-only formatting/lint/link/secret checks, normal/demo tests and JAR audits, frontend typechecking and coverage, browser scenarios, image construction/audits, and installation/upgrade/recovery. Missing tools, reports, inventories, or essential scenarios cause failure. Per-run reports and hashes are under `artifacts/`; read that run's `summary.json`. A workflow file does not establish remote CI success.
+CI runs read-only formatting/lint/link/secret checks, npm/Java dependency audits, all backend unit/integration/security tests with PostgreSQL and backup/restore, frontend typechecking/coverage, and normal/demo browser scenarios with Vite and packaged JARs. It executes the Java suites once and separately packages/tests the demo UI. Missing tools, reports, inventories, or essential scenarios cause failure.
 
-See [CONTRIBUTING](CONTRIBUTING.md), [quality controls](docs/quality.md), the [development guide](docs/11-guia-de-desenvolvimento.md), and [technical documentation](docs/README.md). Maven `package` runs unit tests; integrations require `verify`.
+Before distribution acceptance, run `python3 scripts/verify --mode full` (also the default without arguments). Full mode adds both Java-profile executions, negative quality probes, source snapshots, diagnostic metrics, container construction/image audits, and installation/upgrade/recovery T-19. GitHub Actions runs `ci` automatically and allows manual `full` selection. Per-run reports and hashes are under `artifacts/`; `summary.json` identifies the mode. Passing CI is not distribution acceptance.
+
+See [CONTRIBUTING](CONTRIBUTING.md), [verification scopes](CONTRIBUTING.md#verification-scopes), and the [installation guide](scripts/install-guide.md). Maven `package` runs unit tests; integrations require `verify`.
 
 ## Backup and project status
 
 Follow the [backup guide](scripts/backup-guide.md) for development or the installation guide for containers. Stop and identify the app before capture; keep backup packages outside the checkout on a private Linux filesystem. Restore only into a new database. Keep collection disabled until reading, marks, and search are checked. Retention and off-device copies are manual responsibilities.
 
-Delivery history belongs in [CHANGELOG](CHANGELOG.md) and the linked evidence. [F-03 evidence](docs/evidencias/F-03.md) distinguishes implemented controls from executed acceptance. No stability, benchmark, remote gate, or independent installation claim is implied. [SECURITY](SECURITY.md) records the unresolved private reporting channel. A license, copyright holder, and year have not been supplied; no project license grant is asserted and public preparation remains open.
+Delivery history belongs in [CHANGELOG](CHANGELOG.md). Planning and historical evidence under `docs/` are local and excluded from source delivery; public instructions do not depend on them. Current gate results are identified by each run's reports, mode and source/artifact hashes. No stability, benchmark, remote gate, or independent installation claim is implied. [SECURITY](SECURITY.md) records the unresolved private reporting channel. A license, copyright holder, and year have not been supplied; no project license grant is asserted and public preparation remains open.

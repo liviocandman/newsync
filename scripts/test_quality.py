@@ -77,7 +77,7 @@ class NpmGateTests(unittest.TestCase):
             code = 0
             if command[:2] == ["npm", "audit"]:
                 code = 1
-            elif command[0] == "./mvnw" and "verify" in command:
+            elif command[:2] == ["sh", "./mvnw"] and "verify" in command:
                 # Stop after the audit boundary; this test never starts backend or Docker processes.
                 code = 73
             elif len(command) > 1 and command[1].endswith("verify_environment.py"):
@@ -153,6 +153,79 @@ class NpmGateTests(unittest.TestCase):
 
 
 class AuditTests(unittest.TestCase):
+    def test_successful_refresh_accepts_upstream_database_publication_cadence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("db", "java-db"):
+                target = root / "trivy-db" / name
+                target.mkdir(parents=True)
+                (target / "metadata.json").write_text(
+                    json.dumps(
+                        {
+                            "UpdatedAt": (
+                                datetime.now(UTC) - timedelta(days=3)
+                            ).isoformat()
+                        }
+                    )
+                )
+            output = root / "reports"
+            output.mkdir()
+            with (
+                patch.object(audit, "CACHE", root),
+                patch.object(
+                    audit.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], 0),
+                ),
+            ):
+                _cache, records = audit.databases(["synthetic-trivy"], output)
+            self.assertEqual(records["java-db"]["source"], "updated")
+            self.assertLess(records["java-db"]["ageSeconds"], 5)
+
+    def test_failed_refresh_rejects_stale_or_changed_cache_confirmation(self):
+        for stale, changed in ((True, False), (False, True)):
+            with (
+                self.subTest(stale=stale, changed=changed),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                target = root / "trivy-db/db"
+                target.mkdir(parents=True)
+                metadata = target / "metadata.json"
+                metadata.write_text(
+                    json.dumps(
+                        {
+                            "UpdatedAt": (
+                                datetime.now(UTC) - timedelta(days=3)
+                            ).isoformat()
+                        }
+                    )
+                )
+                (target / "checked.json").write_text(
+                    json.dumps(
+                        {
+                            "checkedAt": (
+                                datetime.now(UTC) - timedelta(hours=25 if stale else 1)
+                            ).isoformat(),
+                            "metadataSha256": "changed"
+                            if changed
+                            else audit.sha(metadata),
+                        }
+                    )
+                )
+                output = root / "reports"
+                output.mkdir()
+                with (
+                    patch.object(audit, "CACHE", root),
+                    patch.object(
+                        audit.subprocess,
+                        "run",
+                        return_value=subprocess.CompletedProcess([], 1),
+                    ),
+                    self.assertRaisesRegex(RuntimeError, "confirmed database cache"),
+                ):
+                    audit.databases(["synthetic-trivy"], output)
+
     def test_partially_identified_jar_cannot_pass_even_at_nine_of_ten(self):
         with tempfile.TemporaryDirectory() as directory:
             jar = Path(directory) / "synthetic.jar"
@@ -325,6 +398,23 @@ class AuditTests(unittest.TestCase):
 
 
 class DeliveryTests(unittest.TestCase):
+    def test_local_planning_documents_are_not_required_by_source_delivery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config").mkdir()
+            (root / "scripts").mkdir()
+            (root / "docs").mkdir()
+            (root / "scripts/main.py").write_text("print('synthetic')\n")
+            (root / "docs/local-review.md").write_text("# Local planning\n")
+            names = [delivery.MANIFEST, "scripts/main.py"]
+            (root / delivery.MANIFEST).write_text(
+                json.dumps({"schemaVersion": 1, "files": names})
+            )
+            self.assertEqual(delivery.files(root), sorted(names))
+            target = root / "artifacts/snapshot"
+            delivery.snapshot(target, root)
+            self.assertFalse((target / "docs").exists())
+
     def test_new_maintained_source_cannot_be_omitted_from_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

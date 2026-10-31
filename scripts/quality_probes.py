@@ -112,6 +112,7 @@ def main():
         )
         classpath = temporary / "classpath.txt"
         resolve = [
+            "sh",
             str(ROOT / "backend/mvnw"),
             "-B",
             "-f",

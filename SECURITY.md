@@ -10,4 +10,4 @@ A functioning private reporting channel and responsible maintainer have not been
 
 ## Dependency checks
 
-The gate inventories npm runtime/build dependencies, final normal/demo JAR libraries, and exact app/PostgreSQL images selected by distribution Compose. Applicable high/critical findings block acceptance unless an exact reviewed, unexpired exception exists. Scanner/inventory failure and stale vulnerability data also block. [Quality controls](docs/quality.md) describe reports and detection limits. A passing audit does not prove absolute absence of vulnerabilities.
+Both gate modes inventory/audit npm runtime/build dependencies and final normal JAR libraries. Full acceptance additionally audits the demo JAR and exact app/PostgreSQL images selected by distribution Compose. Applicable high/critical findings block acceptance unless an exact reviewed, unexpired exception exists. Scanner/inventory failure and stale vulnerability data also block. The [dependency policy](CONTRIBUTING.md#dependency-policy) describes reports and detection limits. A passing audit does not prove absolute absence of vulnerabilities.

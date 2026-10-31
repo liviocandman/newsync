@@ -175,14 +175,36 @@ def databases(scanner, output):
                 f"{name}: update failed and no database metadata is available (exit {code})"
             )
         metadata = json.loads(metadata_file.read_text())
-        age = datetime.now(UTC) - utc(metadata["UpdatedAt"])
-        if not timedelta(0) <= age <= timedelta(hours=24):
+        now = datetime.now(UTC)
+        metadata_hash = sha(metadata_file)
+        confirmation_file = cache / name / "checked.json"
+        if utc(metadata["UpdatedAt"]) > now:
+            raise RuntimeError(f"{name}: database metadata has a future timestamp")
+        if code == 0:
+            # Java identification databases have a different upstream publication cadence.
+            # A successful freshness check is not the database's original build timestamp.
+            confirmation = {
+                "checkedAt": now.isoformat(),
+                "metadataSha256": metadata_hash,
+            }
+            confirmation_file.write_text(json.dumps(confirmation) + "\n")
+        elif confirmation_file.is_file():
+            confirmation = json.loads(confirmation_file.read_text())
+        else:
             raise RuntimeError(
-                f"{name}: database cache exceeds 24 hours or has a future timestamp"
+                f"{name}: update failed without a confirmed cache (exit {code})"
+            )
+        age = now - utc(confirmation["checkedAt"])
+        if confirmation.get("metadataSha256") != metadata_hash or not timedelta(
+            0
+        ) <= age <= timedelta(hours=24):
+            raise RuntimeError(
+                f"{name}: confirmed database cache exceeds 24 hours, changed, or has a future timestamp"
             )
         records[name] = {
             "metadata": metadata,
-            "metadataSha256": sha(metadata_file),
+            "metadataSha256": metadata_hash,
+            "checkedAt": confirmation["checkedAt"],
             "updateExit": code,
             "source": "updated" if code == 0 else "valid-cache",
             "ageSeconds": round(age.total_seconds()),
