@@ -1,10 +1,12 @@
 package br.com.agregador.auth;
 
 import java.sql.SQLException;
+import java.sql.SQLTransientException;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.TransientDataAccessException;
+import org.springframework.transaction.TransactionTimedOutException;
 
 public final class DatabaseFailures {
   private DatabaseFailures() {}
@@ -13,7 +15,9 @@ public final class DatabaseFailures {
     var seen = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
     for (Throwable cause = failure; cause != null && seen.add(cause); cause = cause.getCause()) {
       if (cause instanceof TransientDataAccessException
-          || cause instanceof DataAccessResourceFailureException) return true;
+          || cause instanceof DataAccessResourceFailureException
+          || cause instanceof SQLTransientException
+          || cause instanceof TransactionTimedOutException) return true;
       if (cause instanceof SQLException sql && sql.getSQLState() != null) {
         String state = sql.getSQLState();
         if (state.startsWith("08")

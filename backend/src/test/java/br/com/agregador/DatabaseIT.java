@@ -552,4 +552,67 @@ class DatabaseIT {
                 .singleRow())
         .containsEntry("external_id", null);
   }
+
+  @Test
+  void thousandItemReimportPreservesIdentityAndOnlyTouchesLastSeenForUnchangedArticles() {
+    UUID source = sources.register("https://example.invalid/large", "Large feed");
+    var response = new StringBuilder();
+    for (int index = 0; index < 1000; index++)
+      response.append(
+          item("large-" + index, "Article " + index, "https://example.invalid/article/" + index));
+    collect(source, response.toString());
+    markAll();
+    var before = identity();
+    var editorial =
+        jdbc.sql("SELECT id,updated_at,search_document::text FROM articles ORDER BY id")
+            .query()
+            .listOfRows();
+    jdbc.sql("UPDATE articles SET last_seen_at='2026-01-01T00:00:00Z'").update();
+    jdbc.sql(
+            "CREATE FUNCTION review_reject_editorial_rewrite() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'unchanged editorial update'; END $$")
+        .update();
+    jdbc.sql(
+            "CREATE TRIGGER review_reject_editorial_rewrite BEFORE UPDATE OF title,content_text,search_document ON articles FOR EACH ROW EXECUTE FUNCTION review_reject_editorial_rewrite()")
+        .update();
+    try {
+      collect(source, response.toString());
+      assertThat(identity()).isEqualTo(before).hasSize(1000);
+      assertThat(
+              jdbc.sql("SELECT id,updated_at,search_document::text FROM articles ORDER BY id")
+                  .query()
+                  .listOfRows())
+          .isEqualTo(editorial);
+      assertThat(
+              jdbc.sql("SELECT count(*) FROM articles WHERE last_seen_at>'2026-01-01T00:00:00Z'")
+                  .query(Long.class)
+                  .single())
+          .isEqualTo(1000);
+    } finally {
+      jdbc.sql("DROP TRIGGER review_reject_editorial_rewrite ON articles").update();
+      jdbc.sql("DROP FUNCTION review_reject_editorial_rewrite()").update();
+    }
+  }
+
+  @Test
+  void orderedBatchesAllowPromotingAUrlKeyBeforeReusingItsFormerUrl() {
+    UUID source = sources.register("https://example.invalid/batch-order", "Batch order");
+    collect(source, item(null, "Promoted", "https://example.invalid/old"));
+    var original = jdbc.sql("SELECT id FROM articles").query(UUID.class).single();
+    collect(source, item("promoted", "Promoted", "https://example.invalid/old"));
+    collect(
+        source,
+        item("promoted", "Promoted", "https://example.invalid/new")
+            + item(null, "Replacement", "https://example.invalid/old"));
+    assertThat(
+            jdbc.sql("SELECT id FROM articles WHERE external_id='promoted'")
+                .query(UUID.class)
+                .single())
+        .isEqualTo(original);
+    assertThat(jdbc.sql("SELECT count(*) FROM articles").query(Long.class).single()).isEqualTo(2);
+    assertThat(
+            jdbc.sql("SELECT title FROM articles WHERE external_id IS NULL")
+                .query(String.class)
+                .single())
+        .isEqualTo("Replacement");
+  }
 }

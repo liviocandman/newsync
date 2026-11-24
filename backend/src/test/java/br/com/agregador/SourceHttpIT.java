@@ -458,7 +458,7 @@ class SourceHttpIT {
       jdbc.sql("DROP TRIGGER b03_fail_result ON sources").update();
       jdbc.sql("DROP FUNCTION b03_fail_result()").update();
     }
-    when(clock.instant()).thenReturn(time.plusSeconds(10));
+    when(clock.instant()).thenReturn(time.plusSeconds(15));
     dispatcher.tick();
     assertThat(output.getOut()).contains("COLLECTION_RECOVERED");
     assertThat(sources.find(UUID.fromString(id)).manualRequestedAt()).isNull();
@@ -725,6 +725,83 @@ class SourceHttpIT {
     assertThat(sources.find(a).consecutiveFailures()).isEqualTo(2);
     assertThat(sources.find(a).nextPollAt().toInstant())
         .isBetween(time.plusSeconds(961), time.plusSeconds(1051));
+  }
+
+  @Test
+  void persistentArticleFailureDoesNotStarveAnotherSourceAndCanRecover() throws Exception {
+    UUID a = UUID.fromString(create());
+    UUID b =
+        sources.create("https://healthy.example/feed", "Healthy", time.atOffset(ZoneOffset.UTC));
+    service.refresh(a);
+    when(transport.fetch(eq(sources.find(a).feedUrl()), isNull(), isNull()))
+        .thenReturn(new PublicFeedClient.Response(200, xml("Poison"), "poison", null, null));
+    when(transport.fetch(eq("https://healthy.example/feed"), isNull(), isNull()))
+        .thenReturn(new PublicFeedClient.Response(200, xml("Healthy"), null, null, null));
+    jdbc.sql(
+            "CREATE FUNCTION review_reject_article() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.title='Poison' THEN RAISE EXCEPTION 'test-only article failure'; END IF; RETURN NEW; END $$")
+        .update();
+    jdbc.sql(
+            "CREATE TRIGGER review_reject_article BEFORE INSERT OR UPDATE ON articles FOR EACH ROW EXECUTE FUNCTION review_reject_article()")
+        .update();
+    try {
+      dispatcher.tick();
+      var failed = sources.find(a);
+      assertThat(failed.lastResult()).isEqualTo("failed");
+      assertThat(failed.diagnosticCode()).isEqualTo("PERSISTENCE_FAILED");
+      assertThat(failed.nextPollAt().toInstant()).isAfter(time.plusSeconds(299));
+      assertThat(
+              jdbc.sql("SELECT count(*) FROM articles WHERE source_id=:id")
+                  .param("id", a)
+                  .query(Long.class)
+                  .single())
+          .isZero();
+      dispatcher.tick();
+      assertThat(sources.find(b).lastResult()).isEqualTo("success");
+      assertThat(jdbc.sql("SELECT title FROM articles").query(String.class).single())
+          .isEqualTo("Healthy");
+    } finally {
+      jdbc.sql("DROP TRIGGER review_reject_article ON articles").update();
+      jdbc.sql("DROP FUNCTION review_reject_article()").update();
+    }
+    when(clock.instant()).thenReturn(time.plusSeconds(61));
+    service.refresh(a);
+    dispatcher.tick();
+    assertThat(sources.find(a).lastResult()).isEqualTo("success");
+    assertThat(jdbc.sql("SELECT count(*) FROM articles").query(Long.class).single()).isEqualTo(2);
+  }
+
+  @Test
+  void unconfirmableSourceMetadataStillAllowsAnotherSourceToProgress() throws Exception {
+    UUID a = UUID.fromString(create());
+    UUID b =
+        sources.create("https://healthy.example/feed", "Healthy", time.atOffset(ZoneOffset.UTC));
+    service.refresh(a);
+    when(transport.fetch(anyString(), isNull(), isNull()))
+        .thenReturn(new PublicFeedClient.Response(200, xml("Received"), null, null, null));
+    jdbc.sql(
+            "CREATE FUNCTION review_reject_result() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id='"
+                + a
+                + "'::uuid AND NEW.last_result<>'never' THEN RAISE EXCEPTION 'test-only source failure'; END IF; RETURN NEW; END $$")
+        .update();
+    jdbc.sql(
+            "CREATE CONSTRAINT TRIGGER review_reject_result AFTER UPDATE ON sources DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION review_reject_result()")
+        .update();
+    try {
+      dispatcher.tick();
+      assertThat(sources.find(a).manualRequestedAt()).isNotNull();
+      assertThat(sources.find(a).lastResult()).isEqualTo("never");
+      dispatcher.tick();
+      assertThat(sources.find(b).lastResult()).isEqualTo("success");
+      assertThat(
+              jdbc.sql("SELECT count(*) FROM articles WHERE source_id=:id")
+                  .param("id", a)
+                  .query(Long.class)
+                  .single())
+          .isZero();
+    } finally {
+      jdbc.sql("DROP TRIGGER review_reject_result ON sources").update();
+      jdbc.sql("DROP FUNCTION review_reject_result()").update();
+    }
   }
 
   @org.junit.jupiter.params.ParameterizedTest

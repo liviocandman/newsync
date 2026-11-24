@@ -5,6 +5,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -144,6 +145,10 @@ public class SourceRepository {
   }
 
   public Optional<Row> nextEligible(OffsetDateTime now) {
+    return nextEligible(now, Set.of());
+  }
+
+  public Optional<Row> nextEligible(OffsetDateTime now, Set<UUID> deferred) {
     return jdbc.sql(
             "SELECT "
                 + COLUMNS
@@ -151,9 +156,15 @@ public class SourceRepository {
                 + """
       FROM sources WHERE status='active' AND next_poll_at<=:now
       AND (retry_after_at IS NULL OR retry_after_at<=:now)
+      """
+                + (deferred.isEmpty() ? "" : " AND id NOT IN (:deferred) ")
+                + """
       ORDER BY (manual_requested_at IS NULL),manual_requested_at,CASE WHEN manual_requested_at IS NULL THEN next_poll_at END,id LIMIT 1
       """)
-        .param("now", now)
+        .params(
+            deferred.isEmpty()
+                ? java.util.Map.of("now", now)
+                : java.util.Map.of("now", now, "deferred", deferred))
         .query(Row.class)
         .optional();
   }

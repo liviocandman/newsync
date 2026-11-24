@@ -48,11 +48,14 @@
       "failureStepsJitterCeilingAndRetryAfterFloorAreBounded": 1
     },
     "br.com.agregador.auth.DatabaseFailuresTest": {
+      "poolAcquisitionWithoutSqlStateAndTransactionTimeoutRemainTemporary": 1,
       "transactionWrappersKeepTemporaryDatabaseFailuresDistinctFromProgrammingErrors": 1
     }
   },
   "failsafe": {
     "br.com.agregador.DatabaseIT": {
+      "thousandItemReimportPreservesIdentityAndOnlyTouchesLastSeenForUnchangedArticles": 1,
+      "orderedBatchesAllowPromotingAUrlKeyBeforeReusingItsFormerUrl": 1,
       "normalProfileHasNoInitializerAndAllowsLocalReader": 1,
       "reimportsAndMergesWithoutLosingIdentityStateOrMissingFields": 1,
       "t36RollsBackArticlesAndSourceMetadataWhenCommitFails": 1,
@@ -102,6 +105,8 @@
       "manualDuringAutomaticCoalescesAndHasPriorityBetweenSequentialAttempts": 1,
       "persistedBackoffRetryAfterAndRestartRespectCompletionAndPreservePersonalStates": 1,
       "failedSourceBacksOffWhileAnotherProgressesAndManualCanAdvanceLocalDelay": 1,
+      "persistentArticleFailureDoesNotStarveAnotherSourceAndCanRecover": 1,
+      "unconfirmableSourceMetadataStillAllowsAnotherSourceToProgress": 1,
       "automaticRestartBeforeConfirmationRepeatsIdempotentlyAndHonorsCommittedSchedule": 1,
       "confirmedResultsResetFailuresUsingCompletionTime": 3,
       "failureStepsPersistWithBoundedJitter": 8,
