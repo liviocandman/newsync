@@ -36,6 +36,8 @@ Open [the development reader](http://127.0.0.1:5173). Select **Gerenciar fontes*
 
 The browser origin must exactly match `APP_BASE_URL`. The development database uses port 5434 and the separate `news-personal-local` project. `docker compose --env-file .env.local -f compose.local.yaml down` stops it while preserving the volume. Normal builds never import the demo fixture. To inspect data before allowing network collection, append `--app.collection.enabled=false` to Java.
 
+External `Retry-After` waits are capped at 24 hours. If an earlier version stored a longer wait, pause and reactivate the source to reduce its remaining wait to at most 24 hours; shorter waits remain in force. Collection failures caused by a source are delayed separately so other eligible sources can progress. Unconfirmed attempts remain available for recovery after temporary database failures.
+
 To serve the compiled UI from the JAR, after loading the JDBC environment:
 
 ```bash

@@ -4,6 +4,9 @@ Delivered capabilities are recorded without inventing release tags or mapping sp
 
 ## Unreleased
 
+- Isolate collection failures by source, batch article reconciliation, and avoid rewriting unchanged editorial content while retaining last-seen timestamps.
+- Cap external Retry-After waits at 24 hours and recover older excessive waits when reactivating a source.
+- Share CSRF renewal across concurrent writes and improve text contrast in the reader and source manager.
 - Local RSS/Atom registration/reading without accounts, persistent read/saved marks, and conservative article identity.
 - Automatic collection, manual priority, durable schedules, backoff/Retry-After, and operational diagnostics.
 - Search over received titles/text with source/time filters and URL navigation.
