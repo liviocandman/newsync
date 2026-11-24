@@ -97,10 +97,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 function token() {
-  return (csrf ??= request<Csrf>('/auth/csrf').catch((error) => {
-    csrf = undefined;
+  if (csrf) return csrf;
+  const pending: Promise<Csrf> = request<Csrf>('/auth/csrf').catch((error) => {
+    if (csrf === pending) csrf = undefined;
     throw error;
-  }));
+  });
+  csrf = pending;
+  return pending;
 }
 async function write<T>(
   path: string,
@@ -110,7 +113,8 @@ async function write<T>(
   // Serialize once to retain the same declarative command throughout recovery.
   const body = payload === undefined ? undefined : JSON.stringify(payload);
   for (let attempt = 0; ; attempt++) {
-    const current = await token();
+    const pending = token();
+    const current = await pending;
     try {
       return await request<T>(path, {
         method,
@@ -127,7 +131,7 @@ async function write<T>(
         error.status === 403 &&
         error.code === 'CSRF_INVALID'
       ) {
-        csrf = undefined;
+        if (csrf === pending) csrf = undefined;
         continue;
       }
       throw error;

@@ -166,6 +166,9 @@
       "força somente A quando ele ignora SIGTERM e preserva B"
     ],
     "src/api.test.ts": [
+      "compartilha o carregamento inicial do token entre gravações concorrentes",
+      "renova uma única vez para falhas CSRF concorrentes e mantém cada comando",
+      "uma falha antiga não invalida a renovação já concluída por outra gravação",
       "renova somente CSRF_INVALID e reenvia o mesmo PATCH uma vez",
       "encerra após a segunda falha CSRF sem um terceiro PATCH",
       "falha na renovação encerra sem reenviar a marcação",

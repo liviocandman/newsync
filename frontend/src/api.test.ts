@@ -21,6 +21,13 @@ function csrf(token = 'first') {
 function error(code: string, status = 403) {
   return json({ code, message: 'Recusado.', requestId: 'r' }, status);
 }
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 beforeEach(async () => {
   vi.resetModules();
   vi.stubGlobal('fetch', fetchMock);
@@ -51,6 +58,85 @@ it('renova somente CSRF_INVALID e reenvia o mesmo PATCH uma vez', async () => {
   expect(second.body).toBe(first.body);
   expect(first.headers).toMatchObject({ 'X-CSRF-TOKEN': 'first' });
   expect(second.headers).toMatchObject({ 'X-CSRF-TOKEN': 'second' });
+});
+it('compartilha o carregamento inicial do token entre gravações concorrentes', async () => {
+  const initial = deferred<Response>();
+  fetchMock.mockImplementation((url) =>
+    url === '/api/v1/auth/csrf'
+      ? initial.promise
+      : Promise.resolve(json(state)),
+  );
+  const operations = Promise.all([
+    api.state('a', { read: true }),
+    api.state('b', { saved: true }),
+  ]);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  initial.resolve(csrf());
+  await expect(operations).resolves.toEqual([state, state]);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+it('renova uma única vez para falhas CSRF concorrentes e mantém cada comando', async () => {
+  let csrfRequests = 0;
+  fetchMock.mockImplementation((url, init) => {
+    if (url === '/api/v1/auth/csrf') {
+      csrfRequests++;
+      return Promise.resolve(csrf(csrfRequests === 1 ? 'first' : 'second'));
+    }
+    return Promise.resolve(
+      new Headers(init?.headers).get('X-CSRF-TOKEN') === 'first'
+        ? error('CSRF_INVALID')
+        : json(state),
+    );
+  });
+  await expect(
+    Promise.all([
+      api.state('a', { read: true }),
+      api.state('b', { saved: true }),
+    ]),
+  ).resolves.toEqual([state, state]);
+  expect(csrfRequests).toBe(2);
+  for (const [id, body] of [
+    ['a', '{"read":true}'],
+    ['b', '{"saved":true}'],
+  ]) {
+    const commands = fetchMock.mock.calls.filter(
+      ([url]) => url === `/api/v1/articles/${id}/state`,
+    );
+    expect(commands).toHaveLength(2);
+    expect(commands.map(([, init]) => init?.body)).toEqual([body, body]);
+    expect(
+      commands.map(([, init]) =>
+        new Headers(init?.headers).get('X-CSRF-TOKEN'),
+      ),
+    ).toEqual(['first', 'second']);
+  }
+});
+it('uma falha antiga não invalida a renovação já concluída por outra gravação', async () => {
+  const delayed = deferred<Response>();
+  const started = deferred<void>();
+  let csrfRequests = 0;
+  fetchMock.mockImplementation((url, init) => {
+    if (url === '/api/v1/auth/csrf') {
+      csrfRequests++;
+      return Promise.resolve(csrf(csrfRequests === 1 ? 'first' : 'second'));
+    }
+    if (new Headers(init?.headers).get('X-CSRF-TOKEN') === 'first') {
+      if (url === '/api/v1/articles/a/state') {
+        started.resolve();
+        return delayed.promise;
+      }
+      return Promise.resolve(error('CSRF_INVALID'));
+    }
+    return Promise.resolve(json(state));
+  });
+  const first = api.state('a', { read: true });
+  await started.promise;
+  await expect(api.state('b', { saved: true })).resolves.toEqual(state);
+  delayed.resolve(error('CSRF_INVALID'));
+  await expect(first).resolves.toEqual(state);
+  await expect(api.state('c', { read: false })).resolves.toEqual(state);
+  expect(csrfRequests).toBe(2);
+  expect(fetchMock).toHaveBeenCalledTimes(7);
 });
 it('encerra após a segunda falha CSRF sem um terceiro PATCH', async () => {
   fetchMock
