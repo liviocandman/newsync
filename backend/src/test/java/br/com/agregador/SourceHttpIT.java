@@ -804,6 +804,26 @@ class SourceHttpIT {
     }
   }
 
+  @Test
+  void reactivationBoundsLegacyExtremeRetryAfterAndPreservesNormalWaits() throws Exception {
+    UUID id = UUID.fromString(create());
+    service.edit(id, java.util.Map.of("state", "paused"));
+    jdbc.sql("UPDATE sources SET retry_after_at=:retry WHERE id=:id")
+        .param("retry", time.plusSeconds(999_999_999_999L).atOffset(ZoneOffset.UTC))
+        .param("id", id)
+        .update();
+    service.edit(id, java.util.Map.of("state", "active"));
+    assertThat(sources.find(id).retryAfterAt().toInstant()).isEqualTo(time.plusSeconds(86_400));
+    assertThat(sources.nextEligible(time.atOffset(ZoneOffset.UTC))).isEmpty();
+    service.edit(id, java.util.Map.of("state", "paused"));
+    jdbc.sql("UPDATE sources SET retry_after_at=:retry WHERE id=:id")
+        .param("retry", time.plusSeconds(3600).atOffset(ZoneOffset.UTC))
+        .param("id", id)
+        .update();
+    service.edit(id, java.util.Map.of("state", "active"));
+    assertThat(sources.find(id).retryAfterAt().toInstant()).isEqualTo(time.plusSeconds(3600));
+  }
+
   @org.junit.jupiter.params.ParameterizedTest
   @org.junit.jupiter.params.provider.ValueSource(strings = {"success", "not_modified", "partial"})
   void confirmedResultsResetFailuresUsingCompletionTime(String result) throws Exception {

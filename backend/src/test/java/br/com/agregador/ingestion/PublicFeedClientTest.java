@@ -350,6 +350,61 @@ class PublicFeedClientTest {
     assertNull(PublicFeedClient.retryAfter("not-a-date", NOW));
   }
 
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "86400",
+        "86401",
+        "999999999999",
+        "Fri, 30 Oct 2026 12:00:00 GMT",
+        "Fri, 30 Oct 2026 12:00:01 GMT",
+        "Sat, 31 Oct 2026 12:00:00 GMT",
+        "Fri, 31 Dec 9999 23:59:59 GMT"
+      })
+  void retryAfterCannotSuspendAFeedForMoreThanOneDay(String value) {
+    assertEquals(NOW.plus(Duration.ofHours(24)), PublicFeedClient.retryAfter(value, NOW));
+  }
+
+  @Test
+  void retryAfterKeepsShortDelaysAndRejectsInvalidValues() {
+    assertEquals(NOW, PublicFeedClient.retryAfter("0", NOW));
+    assertEquals(NOW.plusSeconds(86399), PublicFeedClient.retryAfter("86399", NOW));
+    assertEquals(
+        NOW.plusSeconds(86399), PublicFeedClient.retryAfter("Fri, 30 Oct 2026 11:59:59 GMT", NOW));
+    assertNull(PublicFeedClient.retryAfter(null, NOW));
+    for (String value :
+        new String[] {
+          "-1", "1.5", "1000000000000", " ", "x".repeat(129), "Thu, 29 Oct 2026 12:00:00 GMT"
+        }) {
+      assertNull(PublicFeedClient.retryAfter(value, NOW), value);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {200, 304, 301, 429, 503})
+  void cappedRetryAfterSurvivesSuccessNotModifiedRedirectAndFailure(int status) {
+    handler.set(
+        exchange -> {
+          exchange.getResponseHeaders().set("Retry-After", "999999999999");
+          if (status == 301) exchange.getResponseHeaders().set("Location", "/next");
+          send(exchange, status, "application/xml", "<rss/>".getBytes(StandardCharsets.UTF_8));
+        });
+    Instant maximum = NOW.plus(Duration.ofHours(24));
+    if (status == 200 || status == 304) {
+      var response = client().fetch("http://feed.example/", "\"known\"", null);
+      assertEquals(status, response.status());
+      assertEquals(maximum, response.retryAfter());
+    } else {
+      var error =
+          assertThrows(
+              FeedTransportException.class,
+              () -> client().fetch("http://feed.example/", null, null));
+      assertEquals(status == 301 ? "HTTP_REDIRECT_RETRY" : "HTTP_" + status, error.code());
+      assertEquals(maximum, error.retryAfter());
+    }
+    assertEquals(1, requests.get());
+  }
+
   @Test
   void enforcesDecompressedLimitForGzipAndChunkedBodies() throws Exception {
     byte[] oversized = new byte[PublicFeedClient.MAX_BYTES + 1];

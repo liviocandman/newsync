@@ -125,6 +125,8 @@ public class SourceRepository {
       UPDATE sources SET title=:title,status=:state,updated_at=:now,
       lifecycle_version=lifecycle_version + CASE WHEN :transition THEN 1 ELSE 0 END,
       manual_requested_at=CASE WHEN :transition THEN NULL ELSE manual_requested_at END,
+      retry_after_at=CASE WHEN :transition AND :state='active' AND retry_after_at>:now+interval '24 hours'
+        THEN :now+interval '24 hours' ELSE retry_after_at END,
       next_poll_at=CASE WHEN :transition AND :state='active' THEN :now ELSE next_poll_at END
       WHERE id=:id
       """)

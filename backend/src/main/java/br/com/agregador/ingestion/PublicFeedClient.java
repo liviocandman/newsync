@@ -35,6 +35,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class PublicFeedClient {
   static final int MAX_BYTES = 5 * 1024 * 1024;
+  private static final Duration MAX_RETRY_AFTER = Duration.ofHours(24);
   private static final Set<String> XML_TYPES =
       Set.of("application/rss+xml", "application/atom+xml", "application/xml", "text/xml");
   private final Resolver resolver;
@@ -345,9 +346,12 @@ public class PublicFeedClient {
   static Instant retryAfter(String value, Instant now) {
     if (value == null || value.length() > 128) return null;
     try {
-      if (value.matches("[0-9]{1,12}")) return now.plusSeconds(Long.parseLong(value));
+      if (value.matches("[0-9]{1,12}"))
+        return now.plusSeconds(Math.min(Long.parseLong(value), MAX_RETRY_AFTER.toSeconds()));
       Instant result = ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
-      return result.isAfter(now) ? result : null;
+      if (!result.isAfter(now)) return null;
+      Instant maximum = now.plus(MAX_RETRY_AFTER);
+      return result.isAfter(maximum) ? maximum : result;
     } catch (RuntimeException invalid) {
       return null;
     }
