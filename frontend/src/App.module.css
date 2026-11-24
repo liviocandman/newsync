@@ -83,7 +83,7 @@
   letter-spacing: -0.5px;
 }
 .intro {
-  color: #758176;
+  color: #62705f;
   font-size: 13px;
   line-height: 1.6;
 }
@@ -96,7 +96,7 @@
 .source span {
   display: block;
   margin-top: 5px;
-  color: #7a857c;
+  color: #62705f;
   font-size: 11px;
 }
 .list {
@@ -130,17 +130,17 @@
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: #788272;
+  color: #62705f;
 }
 .articleMeta {
   display: flex;
   justify-content: space-between;
   font-size: 10px;
-  color: #74806e;
+  color: #62705f;
 }
 .footnote {
   font-size: 11px;
-  color: #87907f;
+  color: #62705f;
   line-height: 1.7;
   margin: 32px 12px 0;
 }
@@ -155,7 +155,7 @@
 .eyebrow {
   font-size: 10px;
   letter-spacing: 2px;
-  color: #8a927e;
+  color: #65715f;
 }
 .welcome h2 {
   font-family: Georgia, serif;
@@ -168,7 +168,7 @@
 }
 .welcome p {
   font-size: 14px;
-  color: #7d8779;
+  color: #65715f;
   line-height: 1.9;
 }
 .reader {
@@ -180,7 +180,7 @@
   gap: 20px;
   align-items: center;
   justify-content: space-between;
-  color: #818a7a;
+  color: #65715f;
   font-size: 11px;
 }
 .reader h2 {
@@ -194,7 +194,7 @@
 .disclosure {
   font-size: 12px;
   line-height: 1.7;
-  color: #7c8575;
+  color: #65715f;
 }
 .actions {
   display: flex;
@@ -255,7 +255,7 @@
 }
 .emptyBody p {
   font-size: 14px;
-  color: #71806b;
+  color: #65715f;
 }
 .original {
   display: inline-block;
@@ -270,7 +270,7 @@
 }
 .readNote {
   font-size: 11px;
-  color: #8f9887;
+  color: #65715f;
   margin-top: 36px;
 }
 .error {
@@ -286,7 +286,7 @@
   color: inherit;
 }
 .loading {
-  color: #7c8575;
+  color: #65715f;
 }
 @media (max-width: 760px) {
   .header {
@@ -442,7 +442,7 @@
   font-size: 11px;
 }
 .feedUrl {
-  color: #758176;
+  color: #62705f;
   font-size: 11px;
   overflow-wrap: anywhere;
 }
@@ -453,7 +453,7 @@
   margin-top: 20px;
 }
 .sourceTimestamp {
-  color: #758176;
+  color: #62705f;
   font-size: 11px;
 }
 .renameForm {
